@@ -2,8 +2,10 @@
  *  bot.js — Telegram-бот «Power Yard», открывающий Mini App с калькулятором.
  *  Запуск:  npm install && npm start
  *  Нужны переменные окружения (см. .env.example):
- *    BOT_TOKEN  — токен от @BotFather
- *    WEBAPP_URL — адрес размещённого Mini App (например, GitHub Pages)
+ *    BOT_TOKEN     — токен от @BotFather
+ *    WEBAPP_URL    — адрес размещённого Mini App (например, GitHub Pages)
+ *    ALLOWED_USERS — (опц.) список Telegram ID через запятую, кому разрешён бот.
+ *                    Пусто/не задано → бот открыт для всех.
  * ========================================================================= */
 require('dotenv').config();
 const { Bot, InlineKeyboard } = require('grammy');
@@ -17,7 +19,25 @@ if (!BOT_TOKEN || !WEBAPP_URL) {
   process.exit(1);
 }
 
+// Белый список Telegram ID. Если список пуст — бот открыт для всех (fail-open,
+// чтобы случайно не заблокировать всех при пустой переменной).
+const ALLOWED_USERS = (process.env.ALLOWED_USERS || '')
+  .split(',').map((s) => s.trim()).filter(Boolean).map(Number);
+function isAllowed(id) {
+  return ALLOWED_USERS.length === 0 || ALLOWED_USERS.includes(Number(id));
+}
+
 const bot = new Bot(BOT_TOKEN);
+
+// Ограничение доступа: не из белого списка — вежливый отказ, дальше не пускаем.
+bot.use(async (ctx, next) => {
+  const id = ctx.from && ctx.from.id;
+  if (id && !isAllowed(id)) {
+    try { await ctx.reply('⛔ Доступ к калькулятору ограничен. Обратитесь к менеджеру Power Yard.'); } catch (e) {}
+    return;
+  }
+  return next();
+});
 
 // Кнопка-меню (слева от поля ввода) открывает Mini App
 bot.api.setChatMenuButton({
@@ -98,6 +118,7 @@ http.createServer((req, res) => {
         const { initData, text } = JSON.parse(body || '{}');
         const user = checkInitData(initData);
         if (!user) { res.writeHead(403); return res.end(JSON.stringify({ error: 'bad initData' })); }
+        if (!isAllowed(user.id)) { res.writeHead(403); return res.end(JSON.stringify({ error: 'not allowed' })); }
         const result = {
           type: 'article',
           id: 'calc' + user.id + '_' + body.length,

@@ -62,11 +62,17 @@ python3 -m http.server 8080
 
 1. [render.com](https://render.com) → New → **Blueprint** → подключить репозиторий
    `power-yard`. Render прочитает `render.yaml` и создаст сервис `power-yard-bot`.
-2. Задать переменную **`BOT_TOKEN`** (значение из `bot/.env`). `WEBAPP_URL` уже
-   прописан в blueprint.
+2. Задать переменные: **`BOT_TOKEN`** (из `bot/.env`) и **`ALLOWED_USERS`** —
+   список Telegram ID через запятую, кому разрешён бот. `WEBAPP_URL` уже в blueprint.
 3. Deploy. После старта скопировать адрес сервиса (напр.
    `https://power-yard-bot.onrender.com`) в константу `BACKEND_URL` в начале
    `js/app.js`, закоммитить и запушить — заработает кнопка «📤 В чат».
+
+### Доступ к боту (whitelist)
+
+Бот пускает только Telegram ID из `ALLOWED_USERS` (через запятую); пусто → открыт
+всем. **Обязательно добавь свой ID**, иначе сам не войдёшь — узнать через
+[@userinfobot](https://t.me/userinfobot). Пример: `ALLOWED_USERS=73390717,<твой_id>`.
 
 Без Render всё тоже работает: «📤 В чат» отправит текстовую версию через
 `t.me/share`, а «📋 Копировать» кладёт расчёт картинкой в буфер.

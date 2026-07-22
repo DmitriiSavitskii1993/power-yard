@@ -12,3 +12,5 @@ services:
         sync: false   # секрет — ввести вручную в панели Render
       - key: WEBAPP_URL
         value: https://dmitriisavitskii1993.github.io/power-yard/
+      - key: ALLOWED_USERS
+        sync: false   # список Telegram ID через запятую (whitelist)

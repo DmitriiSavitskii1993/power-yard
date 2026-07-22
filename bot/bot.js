@@ -52,7 +52,7 @@ const welcome =
   'Нажмите кнопку ниже, чтобы открыть калькулятор 👇';
 
 bot.command('start', async (ctx) => {
-  const kb = new InlineKeyboard().webApp('🧮 Открыть калькулятор', WEBAPP_URL);
+  const kb = new InlineKeyboard().webApp('Открыть', WEBAPP_URL);
   const msg = await ctx.reply(welcome, { parse_mode: 'Markdown', reply_markup: kb });
   // закрепляем сообщение с кнопкой, чтобы калькулятор всегда был в закрепе сверху чата
   try {
@@ -63,7 +63,7 @@ bot.command('start', async (ctx) => {
 });
 
 bot.command('calc', async (ctx) => {
-  const kb = new InlineKeyboard().webApp('🧮 Открыть калькулятор', WEBAPP_URL);
+  const kb = new InlineKeyboard().webApp('Открыть', WEBAPP_URL);
   await ctx.reply('Открыть калькулятор:', { reply_markup: kb });
 });
 
@@ -75,6 +75,13 @@ bot.on('message:web_app_data', async (ctx) => {
   } catch (e) {
     await ctx.reply('Получены данные из приложения.');
   }
+});
+
+// На любое текстовое сообщение (не команду) — сразу кнопка «Открыть».
+// Так кнопка запуска приложения всегда под рукой, как у BotFather.
+bot.on('message:text', async (ctx) => {
+  const kb = new InlineKeyboard().webApp('Открыть', WEBAPP_URL);
+  await ctx.reply('🚗 Power Yard — калькулятор авто. Нажмите «Открыть» 👇', { reply_markup: kb });
 });
 
 bot.catch((err) => console.error('Ошибка бота:', err));

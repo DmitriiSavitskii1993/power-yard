@@ -48,35 +48,35 @@ python3 -m http.server 8080
 # открыть http://localhost:8080 (вместо MainButton появится обычная кнопка)
 ```
 
-## Деплой (по шагам)
+## Деплой
 
-### 1. Бот у BotFather
+### Фронтенд — GitHub Pages ✅ (готово)
 
-1. В Telegram открыть [@BotFather](https://t.me/BotFather) → `/newbot` →
-   имя «Киндер Калькулятор», username вида `kinder_calc_bot`.
-2. Сохранить **токен** (передавать безопасно, не в открытом чате).
-3. После деплоя фронта (шаг 2): `/setmenubutton` → выбрать бота → указать URL
-   приложения и подпись «Калькулятор» (или это сделает сам бот при первом запуске).
-4. По желанию `/newapp` → привязать Mini App: загрузить иконку 640×360
-   (`img/cover.html` → скриншот) и задать short name.
+Репозиторий: `DmitriiSavitskii1993/power-yard`, Pages включён.
+Приложение живёт по адресу **https://dmitriisavitskii1993.github.io/power-yard/**.
+После `git push` в `main` сайт обновляется автоматически (1–2 мин).
 
-### 2. Фронтенд — GitHub Pages
+### Бот — Render
 
-1. Создать репозиторий (например `kinder-calc`), залить все файлы проекта.
-2. Settings → Pages → Source: `main`, папка `/ (root)`. Файл `.nojekyll` уже есть.
-3. Приложение будет доступно по `https://<аккаунт>.github.io/kinder-calc/`.
+Проще всего через Blueprint (файл `render.yaml` уже в репозитории):
 
-### 3. Бот — Render (для кнопки «📤 В чат»)
-
-1. [render.com](https://render.com) → New → **Web Service** → подключить репозиторий.
-2. Runtime: Node. Build: `npm install`. Start: `npm start`.
-3. Environment: `BOT_TOKEN` (из шага 1), `WEBAPP_URL` (адрес Pages из шага 2).
-4. После деплоя вписать адрес сервиса (например
-   `https://kinder-calc-bot.onrender.com`) в константу `BACKEND_URL` в начале
-   `js/app.js` и закоммитить.
+1. [render.com](https://render.com) → New → **Blueprint** → подключить репозиторий
+   `power-yard`. Render прочитает `render.yaml` и создаст сервис `power-yard-bot`.
+2. Задать переменную **`BOT_TOKEN`** (значение из `bot/.env`). `WEBAPP_URL` уже
+   прописан в blueprint.
+3. Deploy. После старта скопировать адрес сервиса (напр.
+   `https://power-yard-bot.onrender.com`) в константу `BACKEND_URL` в начале
+   `js/app.js`, закоммитить и запушить — заработает кнопка «📤 В чат».
 
 Без Render всё тоже работает: «📤 В чат» отправит текстовую версию через
 `t.me/share`, а «📋 Копировать» кладёт расчёт картинкой в буфер.
+
+### BotFather
+
+- `/setmenubutton` → выбрать бота → URL `https://dmitriisavitskii1993.github.io/power-yard/`,
+  подпись «Калькулятор» (либо это сделает сам бот при первом `/start`).
+- По желанию `/newapp` → привязать Mini App: обложку 640×360
+  (`img/cover.html` → скриншот) и иконку (`img/icon.html`).
 
 ## Настройки внутри приложения
 

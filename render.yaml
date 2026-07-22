@@ -1,0 +1,14 @@
+# Render Blueprint — деплой Telegram-бота Power Yard.
+# В Render: New → Blueprint → подключить репозиторий → задать BOT_TOKEN.
+services:
+  - type: web
+    name: power-yard-bot
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: BOT_TOKEN
+        sync: false   # секрет — ввести вручную в панели Render
+      - key: WEBAPP_URL
+        value: https://dmitriisavitskii1993.github.io/power-yard/

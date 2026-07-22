@@ -1,0 +1,17 @@
+{
+  "name": "kinder-auto-calculator-bot",
+  "version": "1.0.0",
+  "description": "Telegram-бот Киндер Калькулятора (запуск из корня репо для Render)",
+  "main": "bot/bot.js",
+  "scripts": {
+    "start": "node bot/bot.js",
+    "test": "node tests/test-calc.js"
+  },
+  "dependencies": {
+    "grammy": "^1.30.0",
+    "dotenv": "^16.4.5"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

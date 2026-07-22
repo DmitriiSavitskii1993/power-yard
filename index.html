@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Power Yard — Калькулятор авто</title>
+  <link rel="icon" href="data:,">
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Russo+One&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="app">
+
+    <!-- Шапка -->
+    <header class="header">
+      <h1 class="title">🚗 Power Yard</h1>
+      <button id="btnSettings" class="icon-btn" title="Настройки">⚙️</button>
+    </header>
+    <div id="cbrStatus" class="cbr-status">Курсы ЦБ: загрузка…</div>
+
+    <!-- Основной экран -->
+    <main id="screenCalc" class="screen">
+
+      <!-- Курсы на сегодня (вводятся 1 раз, запоминаются для всех расчётов) -->
+      <section class="card rate-card" id="rateCard">
+        <div class="card-head rate-head" id="rateToggle">
+          <span>💱 Курсы на сегодня</span>
+          <span id="rateSummary" class="rate-summary"></span>
+          <span id="rateChevron" class="chevron">▸</span>
+        </div>
+        <div id="rateBody" class="hidden">
+          <div id="rateList" class="grid2"></div>
+          <p class="hint">Вводятся один раз — запоминаются для всех расчётов. Пошлина и таможенные платежи считаются по курсу ЦБ автоматически.</p>
+        </div>
+      </section>
+
+      <!-- Выбор страны -->
+      <div class="segmented" id="countryTabs">
+        <button class="seg active" data-country="kr">🇰🇷 Корея</button>
+        <button class="seg" data-country="eu">🇪🇺 Европа</button>
+      </div>
+
+      <!-- Опции авто (компактно) -->
+      <section class="card toggles">
+        <label class="switch-row">
+          <span>Электрокар</span>
+          <input type="checkbox" id="isElectric" class="switch">
+        </label>
+      </section>
+
+      <!-- Параметры авто -->
+      <section class="card">
+        <div class="field">
+          <label for="age">Возраст авто</label>
+          <select id="age"></select>
+        </div>
+
+        <div class="field" id="fieldVolume">
+          <label for="volume">Объём двигателя, см³</label>
+          <input type="number" id="volume" inputmode="numeric" placeholder="2000">
+        </div>
+
+        <div class="field">
+          <label for="power">Мощность двигателя</label>
+          <div class="input-group">
+            <input type="number" id="power" inputmode="numeric" placeholder="150">
+            <div class="unit-toggle">
+              <button class="unit active" data-unit="hp">л.с.</button>
+              <button class="unit" data-unit="kw">кВт</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Цена и доставка -->
+      <section class="card">
+        <!-- Европа: количество авто в контейнере (влияет на фрахт) -->
+        <div class="field hidden" id="fieldCarCount">
+          <label for="carCount">Количество авто</label>
+          <select id="carCount">
+            <option value="1">1 авто (фрахт 5 900 €)</option>
+            <option value="2">2+ авто — консолидация (фрахт 5 100 €)</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="carPrice">Цена авто <span id="curLabel1" class="cur">₩</span></label>
+          <input type="number" id="carPrice" inputmode="numeric" placeholder="18800000">
+        </div>
+
+        <!-- Корея: доставка и дилерские -->
+        <div class="field" id="fieldDeliveryWon">
+          <label for="deliveryWon">Доставка по Корее + фрахт, ₩</label>
+          <input type="number" id="deliveryWon" inputmode="numeric" placeholder="1300000">
+        </div>
+        <div class="field" id="fieldDealerWon">
+          <label for="dealerWon">Дилерские расходы, ₩</label>
+          <input type="number" id="dealerWon" inputmode="numeric" placeholder="440000">
+        </div>
+        <p class="hint hidden" id="krVatInfo"></p>
+
+        <!-- Европа: фрахт (автоматически по количеству авто) -->
+        <div class="field hidden" id="fieldFreight">
+          <label for="freightEur">Фрахт, € <span class="cur">(автоматически)</span></label>
+          <input type="number" id="freightEur" inputmode="numeric" readonly>
+        </div>
+      </section>
+
+
+      <!-- Расходы по РФ -->
+      <section class="card">
+        <div class="card-head">Расходы по РФ, ₽</div>
+        <div id="expenseList"></div>
+        <div class="field">
+          <label for="commission">Комиссия компании, ₽</label>
+          <input type="number" id="commission" inputmode="numeric" placeholder="0">
+        </div>
+        <div class="field">
+          <label for="extraExpenses">Доп. расходы, ₽</label>
+          <input type="number" id="extraExpenses" inputmode="numeric" placeholder="0">
+        </div>
+      </section>
+
+      <!-- Результат -->
+      <section id="result" class="result hidden"></section>
+    </main>
+
+    <!-- Экран настроек -->
+    <section id="screenSettings" class="screen hidden">
+      <div class="settings-head">
+        <button id="btnBack" class="icon-btn">←</button>
+        <h2>Настройки</h2>
+      </div>
+
+      <section class="card">
+        <div class="card-head">Курсы ЦБ РФ
+          <button id="btnRefreshCbr" class="mini-btn">⟳ Обновить</button>
+        </div>
+        <div class="grid2">
+          <label>USD <input type="text" inputmode="decimal" data-rate="cbr.USD"></label>
+          <label>EUR <input type="text" inputmode="decimal" data-rate="cbr.EUR"></label>
+          <label>KRW (за 1 ₩) <input type="text" inputmode="decimal" data-rate="cbr.KRW"></label>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-head">Рыночные курсы (платёж за авто)</div>
+        <div class="grid2">
+          <label>₩ за 1 USDT <input type="text" inputmode="decimal" data-rate="market.KRW_USDT"></label>
+          <label>USDT → ₽ <input type="text" inputmode="decimal" data-rate="market.USDT_RUB"></label>
+          <label>€ продажа, ₽ <input type="text" inputmode="decimal" data-rate="market.EUR_SALE"></label>
+        </div>
+        <p class="hint">Корея: оплата вон через USDT (два курса). Европа: платёж по курсу «€ продажа». Таможня всегда по ЦБ.</p>
+      </section>
+
+      <section class="card">
+        <div class="card-head">Параметры электрокаров</div>
+        <div class="grid2">
+          <label>Пошлина, % <input type="text" inputmode="decimal" data-ev="evDutyPercent"></label>
+          <label>НДС, % <input type="text" inputmode="decimal" data-ev="evVatPercent"></label>
+        </div>
+        <p class="hint">Расчёт электрокаров: пошлина 15% + акциз (НК РФ ст.193) + НДС 22% (ставки 2026). Здесь можно поправить ставки при изменении закона.</p>
+      </section>
+
+      <div class="settings-actions">
+        <button id="btnSaveSettings" class="primary-btn">Сохранить</button>
+        <button id="btnResetSettings" class="ghost-btn">Сбросить всё</button>
+      </div>
+      <p class="hint">Правки сохраняются на этом устройстве и в облаке Telegram.</p>
+    </section>
+
+  </div>
+
+  <!-- Плавающая кнопка «свернуть клавиатуру» (появляется при вводе) -->
+  <button id="kbDone" class="kb-done hidden" type="button">▾ Свернуть</button>
+
+  <script src="js/data.js"></script>
+  <script src="js/logo.js"></script>
+  <script src="js/calc.js"></script>
+  <script src="js/rates.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

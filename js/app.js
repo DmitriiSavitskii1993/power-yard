@@ -5,7 +5,7 @@ const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : 
 const inTelegram = !!(tg && tg.initData !== undefined && tg.platform && tg.platform !== 'unknown');
 
 // Адрес бэкенда бота (Render). Пусто → отправка через t.me/share.
-const BACKEND_URL = '';
+const BACKEND_URL = 'https://power-yard-bot.onrender.com';
 
 /* --- фирменные цвета Power Yard (кнопка Telegram, PNG-рендер) --- */
 const BRAND_COLOR = '#CD003E';  // красный акцент

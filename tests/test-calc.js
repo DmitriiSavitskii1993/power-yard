@@ -10,8 +10,8 @@ const { calculate, hpToKw, kwToHp } = require(path.join(__dirname, '..', 'js', '
 
 // Фикс-курсы как в таблице на момент сверки
 const RATES = {
-  cbr: { USD: 78.554, EUR: 89.7558, KRW: 0.0530054 },
-  market: { KRW_USDT: 1510, USDT_RUB: 84, EUR_SALE: 94.2 },
+  cbr: { USD: 78.554, EUR: 89.7558, KRW: 0.0530054, CNY: 10.90 },
+  market: { KRW_USDT: 1510, USDT_RUB: 84, EUR_SALE: 94.2, USD_VTB: 82, CNY_VTB: 11.4 },
 };
 
 let failed = 0;
@@ -38,9 +38,9 @@ const r1 = calculate({
   ],
 }, { rates: RATES });
 
-check('Корейский НДС 9% (₩)', r1.koreanVatWon, 1848600);
-check('Возврат 40% НДС (₩)', r1.vatRefundWon, 739440);
-check('К оплате (₩)', r1.payWon, 19800560);
+check('Корейский НДС 9% (₩)', r1.foreign.vat, 1848600);
+check('Возврат 40% НДС (₩)', r1.foreign.refund, 739440);
+check('К оплате (₩)', r1.foreign.pay, 19800560);
 check('Расходы Корея (₽)', r1.carCostRub, 1101488, 1);
 check('Таможенная стоимость (₽)', r1.customsValueRub, 1088731, 1);
 check('Пошлина (₽)', r1.duty, 628291, 1);           // 3.5 €/см³ × 2000 × 89.7558
@@ -65,8 +65,8 @@ const r2 = calculate({
   ],
 }, { rates: RATES });
 
-check('Фрахт (€)', r2.freightEur, 5900);
-check('Стоимость до РФ (€)', r2.foreignEur, 25900);
+check('Фрахт (€)', r2.foreign.freight, 5900);
+check('Стоимость до РФ (€)', r2.foreign.foreign, 25900);
 check('Платёж за авто (₽) по 94.2', r2.carCostRub, 2439780);
 check('Таможенная стоимость (₽) по ЦБ EUR', r2.customsValueRub, 2324675, 1);
 check('Пошлина (₽): 48% (брекет ≤42 300 €)', r2.duty, 1115844, 1);
@@ -110,7 +110,7 @@ checkTrue('EV 81 л.с. → полный утиль', b4.utilFee > 5200);
 
 // Фрахт ЕС: 1 авто ↔ 2+
 const f1 = calculate({ country: 'eu', age: '<3', volumeCc: 1000, powerHp: 100, carPrice: 10000, carCount: 2, expenses: [] }, { rates: RATES });
-check('Фрахт 2+ авто (€)', f1.freightEur, 5100);
+check('Фрахт 2+ авто (€)', f1.foreign.freight, 5100);
 
 // Старше 3 лет: 2500 см³, 3-5 лет → 3.0 €/см³
 const a1 = calculate({ country: 'eu', age: '3-5', volumeCc: 2500, powerHp: 150, carPrice: 15000, carCount: 1, expenses: [] }, { rates: RATES });
@@ -137,6 +137,89 @@ check('kwToHp(110.32) ≈ 150 л.с.', kwToHp(110.325), 150, 0.01);
 // Этапы оплаты: сумма этапов = итого
 const sumStages = r1.stages.reduce((s, st) => s + st.value, 0);
 check('Тест 1: сумма этапов = ИТОГО', sumStages, r1.grandTotal, 0.01);
+
+const sumStages2 = (r) => r.stages.reduce((s, st) => s + st.value, 0);
+
+/* ============ Тест 5 — Корея ЮРЛИЦО (большой объём, малая мощность → skipPreferential) ============ */
+console.log('\n— Тест 5: Корея юрлицо, 3200 см³, 150 л.с., <3 лет —');
+const jurIn = {
+  country: 'kr', customsMode: 'jur', isElectric: false, age: '<3',
+  volumeCc: 3200, powerHp: 150,
+  carPrice: 18800000, deliveryWon: 1300000, dealerWon: 440000,
+  commission: 0, extraExpenses: 0, expenses: [],
+};
+const r5 = calculate(jurIn, { rates: RATES });
+const sumWon5 = 18800000 + 1300000 + 440000;
+const cv5 = sumWon5 * RATES.cbr.KRW * 1.03;               // таможенная стоимость юрлица (ЦБ×1.03)
+const units5 = hpToKw(150) / 0.75;                        // ≈ 147.1 ≤ 150 → ставка 64 ₽
+const excise5 = 64 * units5;
+check('Тамож. стоимость юрлица = база×ЦБ×1.03', r5.customsValueRub, cv5, 1);
+check('Пошлина 15%', r5.duty, 0.15 * cv5, 1);
+check('Акциз (64 × units, т.к. 147 л.с. ≤ 150)', r5.excise, excise5, 1);
+check('НДС 22% на (СТ+пошлина+акциз)', r5.vat, 0.22 * (cv5 + 0.15 * cv5 + excise5), 1);
+// 3200 см³ → группа 3001-3500; 150 л.с. = 110.3 кВт → полоса 95.62-117.68 → cNew 129.2
+check('Утиль юрлица = полный (коэф. 129.2), БЕЗ льготы', r5.utilFee, 20000 * 129.2, 1);
+const r5phys = calculate({ ...jurIn, customsMode: 'phys_rf' }, { rates: RATES });
+check('Сравнение: физлицо РФ на том же авто → льготный утиль 3400', r5phys.utilFee, 3400);
+checkTrue('Юрлицо утиль > физлицо (skipPreferential работает)', r5.utilFee > r5phys.utilFee);
+check('Тест 5: Σ этапов = ИТОГО', sumStages2(r5), r5.grandTotal, 0.01);
+
+/* ============ Тест 6 — Китай, ручная растаможка через КГ ($) ============ */
+console.log('\n— Тест 6: Китай phys_kg, $20000, плечи 1000/1800, ТО $1500 —');
+const r6 = calculate({
+  country: 'cn', customsMode: 'phys_kg', currency: 'USD', isElectric: false, age: '<3',
+  volumeCc: 2000, powerHp: 150, carPrice: 20000,
+  leg1: 1000, leg2: 1800, manualCustoms: 1500, manualTransit: 0,
+  commission: 0, extraExpenses: 0,
+  expenses: [{ key: 'broker', value: 100000 }, { key: 'rf_logistics', value: 0 }],
+}, { rates: RATES });
+check('Ручной режим: пошлина = 0', r6.duty, 0);
+check('Ручной режим: НДС = 0', r6.vat, 0);
+check('Ручной режим: утиль = 0', r6.utilFee, 0);
+check('Растаможка ТО (₽) = 1500 × USD_VTB', r6.manualCustomsRub, 1500 * 82, 1);
+check('Логистика (плечи 2800 × USD_VTB)', r6.manualLogisticsRub, 2800 * 82, 1);
+check('Авто (₽) = 20000 × USD_VTB', r6.carCostRub, 20000 * 82, 1);
+const exp6 = 20000 * 82 + 1500 * 82 + 2800 * 82 + 100000;
+check('ИТОГО = авто + ТО + логистика + расходы РФ', r6.grandTotal, exp6, 1);
+check('Тест 6: Σ этапов = ИТОГО', sumStages2(r6), r6.grandTotal, 0.01);
+
+/* ============ Тест 7 — Китай, $ vs ¥ (курс ВТБ) ============ */
+console.log('\n— Тест 7: Китай физлицо РФ, $20000 vs ¥145000 —');
+const r7usd = calculate({ country: 'cn', customsMode: 'phys_rf', currency: 'USD', age: '<3', volumeCc: 2000, powerHp: 150, carPrice: 20000, leg1: 0, leg2: 0, expenses: [] }, { rates: RATES });
+const r7cny = calculate({ country: 'cn', customsMode: 'phys_rf', currency: 'CNY', age: '<3', volumeCc: 2000, powerHp: 150, carPrice: 145000, leg1: 0, leg2: 0, expenses: [] }, { rates: RATES });
+check('Китай $: авто = 20000 × USD_VTB', r7usd.carCostRub, 20000 * 82, 1);
+check('Китай ¥: авто = 145000 × CNY_VTB', r7cny.carCostRub, 145000 * 11.4, 1);
+check('Китай $: тамож. стоимость = 20000 × ЦБ$', r7usd.customsValueRub, 20000 * 78.554, 1);
+check('Китай ¥: тамож. стоимость = 145000 × ЦБ¥', r7cny.customsValueRub, 145000 * 10.90, 1);
+
+/* ============ Тест 8 — CIF СПб (плечи не считаются) ============ */
+console.log('\n— Тест 8: Китай CIF СПб —');
+const r8cif = calculate({ country: 'cn', customsMode: 'phys_rf', currency: 'USD', age: '<3', volumeCc: 2000, powerHp: 150, carPrice: 20000, isCif: true, leg1: 1000, leg2: 1800, expenses: [] }, { rates: RATES });
+const r8no = calculate({ country: 'cn', customsMode: 'phys_rf', currency: 'USD', age: '<3', volumeCc: 2000, powerHp: 150, carPrice: 20000, isCif: false, leg1: 1000, leg2: 1800, expenses: [] }, { rates: RATES });
+check('CIF: логистика (плечи) = 0', r8cif.foreignLogisticsRub, 0);
+check('CIF: тамож. стоимость = только цена × ЦБ$', r8cif.customsValueRub, 20000 * 78.554, 1);
+checkTrue('non-CIF: плечи добавлены в логистику', r8no.foreignLogisticsRub > 0);
+check('non-CIF: тамож. стоимость = цена + плечи (по ЦБ$)', r8no.customsValueRub, (20000 + 2800) * 78.554, 1);
+checkTrue('non-CIF итог больше CIF (на логистику)', r8no.grandTotal > r8cif.grandTotal);
+
+/* ============ Тест 9 — Финансирование +2%/мес ============ */
+console.log('\n— Тест 9: финансирование 6 мес —');
+const r9base = calculate({ country: 'eu', customsMode: 'phys_rf', age: '<3', volumeCc: 1500, powerHp: 150, carPrice: 20000, carCount: 1, expenses: [] }, { rates: RATES });
+const r9fin = calculate({ country: 'eu', customsMode: 'phys_rf', age: '<3', volumeCc: 1500, powerHp: 150, carPrice: 20000, carCount: 1, financingEnabled: true, financingMonths: 6, expenses: [] }, { rates: RATES });
+check('Финансирование = 2% × 6 × база', r9fin.financing, 0.02 * 6 * r9base.grandTotal, 1);
+check('ИТОГО с финансированием = база × 1.12', r9fin.grandTotal, r9base.grandTotal * 1.12, 1);
+check('Тест 9: Σ этапов = ИТОГО', sumStages2(r9fin), r9fin.grandTotal, 0.01);
+
+/* ============ Тест 10 — явная регрессия (новые параметры инертны на legacy-пути) ============ */
+console.log('\n— Тест 10: регрессия Тест-1 с явными currency/customsMode —');
+const r10 = calculate({
+  country: 'kr', currency: 'KRW', customsMode: 'phys_rf', isElectric: false, age: '<3',
+  volumeCc: 2000, powerKw: 120, carPrice: 18800000, deliveryWon: 1300000, dealerWon: 440000,
+  commission: 0, extraExpenses: 0,
+  expenses: [{ key: 'broker', value: 120000 }, { key: 'rf_logistics', value: 265000 }],
+}, { rates: RATES });
+check('Регрессия: тот же ИТОГО 3 019 703', r10.grandTotal, 3019703, 1);
+check('Регрессия: Σ этапов = ИТОГО', sumStages2(r10), r10.grandTotal, 0.01);
 
 /* ============ Итог ============ */
 console.log(failed === 0 ? '\n🎉 Все тесты пройдены' : `\n💥 Провалено проверок: ${failed}`);

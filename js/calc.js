@@ -1,26 +1,21 @@
 /* =========================================================================
- *  calc.js — движок расчёта стоимости авто «под ключ» (Киндер: Корея + Европа)
+ *  calc.js — движок расчёта стоимости авто «под ключ» (Power Yard)
  *
- *  Логика перенесена из Google-таблицы «Киндер Калькулятор» и сверена
- *  на контрольном примере (Корея, 2000 см³, 120 кВт, <3 лет):
- *    пошлина + сбор = 633 215 ₽, утиль 900 000 ₽, итого 3 019 703 ₽ — как в листе.
+ *  Страны: Корея, Европа, Китай.
+ *  Матрица: страна × режим таможни × валюта.
+ *    Режимы: phys_rf (физлицо РФ, ЕТС), jur (юрлицо, коммерческий импорт),
+ *            phys_kg (через Киргизию, ручная растаможка),
+ *            manual_belka (через Беларусь, ручная растаможка).
+ *  Плюс режим CIF СПб (цена уже с доставкой) и финансирование (рассрочка).
  *
- *  Ключевые принципы:
- *    – ТАМОЖЕННАЯ СТОИМОСТЬ считается по курсу ЦБ РФ (для пошлины/НДС).
- *    – РЕАЛЬНЫЙ ПЛАТЁЖ за авто считается по рыночному курсу:
- *        Корея — воны → USDT → ₽ (курсы KRW_USDT / USDT_RUB),
- *        Европа — € × курс «евро продажа» (EUR_SALE).
- *    – Утильсбор = базовая ставка × коэффициент из таблицы (объём+мощность+возраст).
+ *  Принципы:
+ *    – ТАМОЖЕННАЯ СТОИМОСТЬ — по курсу ЦБ РФ (юрлицо: ЦБ+3%).
+ *    – РЕАЛЬНЫЙ ПЛАТЁЖ — по рыночному курсу (Корея ₩→USDT→₽, Европа €×продажа,
+ *      Китай $/¥ по курсу ВТБ).
+ *    – Утильсбор = базовая ставка × коэффициент из таблицы (льгота — только физлицо РФ).
  *
- *  Отличия от исходной таблицы (сознательные исправления):
- *    1. Лист «Европа» считал таможенную стоимость по курсу ЮАНЯ (остаток от
- *       китайского шаблона) и держал ставку 2.5 €/см³ / 54% / сбор 2 462 ₽
- *       захардкоженными. Здесь: таможенная стоимость по курсу ЦБ EUR,
- *       брекеты пошлины и сбора — полноценные формулы.
- *    2. Корея: в листе процентная пошлина бралась от базы С дилерскими
- *       расходами, а брекет выбирался по базе БЕЗ них. Здесь единая база:
- *       (цена + доставка + дилерские) × курс ЦБ KRW. На контрольном примере
- *       итог совпадает с листом.
+ *  Контрольные примеры (физлицо РФ) сверены с таблицей заказчика:
+ *    Корея 2000 см³/120 кВт/<3 лет → пошлина+сбор 633 215 ₽, итого 3 019 703 ₽.
  * ========================================================================= */
 
 /* --- Вспомогательные конвертеры л.с. <-> кВт --- */
@@ -29,25 +24,23 @@ function kwToHp(kw) { return kw / 0.7355; }
 
 /* --- Поиск коэффициента утильсбора ---
  * Льготный коэффициент (0.17/0.26 → 3400/5200) применяется, если мощность ≤ порога
- * (160 л.с. для ДВС, 80 л.с. для электрокара). Выше порога — по таблице двс/эл. */
-function findUtilCoef(cfg, isElectric, volumeCc, powerKw, powerHp, isOlderThan3) {
+ * (160 л.с. ДВС / 80 л.с. EV) И не задан skipPreferential (юрлицо льготу не получает). */
+function findUtilCoef(cfg, isElectric, volumeCc, powerKw, powerHp, isOlderThan3, skipPreferential) {
   const pref = cfg.utilPreferentialCoef || { new: 0.17, old: 0.26 };
   const thrHp = isElectric
     ? (cfg.utilPreferentialHp ? cfg.utilPreferentialHp.ev : 80)
     : (cfg.utilPreferentialHp ? cfg.utilPreferentialHp.ice : 160);
 
-  // льготный утиль — мощность в пределах порога (включительно)
-  if (powerHp <= thrHp) return isOlderThan3 ? pref.old : pref.new;
+  // льготный утиль — мощность в пределах порога (для юрлица льгота отключена)
+  if (!skipPreferential && powerHp <= thrHp) return isOlderThan3 ? pref.old : pref.new;
 
-  // выше порога — детальная таблица коэффициентов.
-  // ищем по НИЖНЕЙ границе мощности (устойчиво к округлению кВт и стыкам диапазонов)
+  // выше порога (или юрлицо) — детальная таблица коэффициентов.
   if (isElectric) {
     const cand = cfg.utilEv.filter(r => powerKw >= r.kMin);
     const row = cand.length ? cand[cand.length - 1] : cfg.utilEv[cfg.utilEv.length - 1];
     return isOlderThan3 ? row.cOld : row.cNew;
   }
-  // объёмную группу выбираем по НИЖНЕЙ границе (наибольший vMin ≤ объёма) —
-  // устойчиво к дробным объёмам в зазорах целочисленных полос (2000.5 и т.п.)
+  // объёмную группу выбираем по НИЖНЕЙ границе (устойчиво к дробным объёмам в зазорах)
   let targetVMin = cfg.utilIce[0].vMin;
   cfg.utilIce.forEach(r => { if (volumeCc >= r.vMin && r.vMin >= targetVMin) targetVMin = r.vMin; });
   const band = cfg.utilIce.filter(r => r.vMin === targetVMin);
@@ -63,17 +56,15 @@ function findCustomsFee(cfg, customsValueRub) {
   return row ? row.fee : cfg.customsFee[cfg.customsFee.length - 1].fee;
 }
 
-/* --- Расчёт пошлины (и сопутствующих платежей) ---
+/* --- Пошлина ФИЗЛИЦА РФ (ЕТС): электро 15%+акциз+НДС22%; <3 лет max(%,€/см³); >3 €/см³ ---
  * Возвращает { duty, excise, vat, customsFee, total, method } */
 function calcDutyBlock(cfg, p) {
   const cbrEur = cfg.rates.cbr.EUR;
   const customsFee = findCustomsFee(cfg, p.customsValueRub);
 
-  // --- Электрокар: пошлина 15% + акциз + НДС 22% (СТП, 2026) ---
   if (p.isElectric) {
     const duty   = cfg.evDutyPercent * p.customsValueRub;
-    // акциз: НК РФ ст.193 — ставка за 0.75 кВт, база = мощность(кВт) / 0.75
-    const exciseUnits = p.powerKw / 0.75;
+    const exciseUnits = p.powerKw / 0.75; // НК РФ ст.193 — ставка за 0.75 кВт
     const exRow  = cfg.exciseEv.find(r => exciseUnits <= r.unitMax) || cfg.exciseEv[cfg.exciseEv.length - 1];
     const excise = exRow.rub * exciseUnits;
     const vat    = cfg.evVatPercent * (p.customsValueRub + duty + excise);
@@ -84,7 +75,6 @@ function calcDutyBlock(cfg, p) {
     };
   }
 
-  // --- Менее 3 лет: max(% от стоимости, €/см³) ---
   if (p.age === '<3') {
     const b = cfg.dutyUnder3.find(r => p.customsValueEur <= r.valMaxEur)
            || cfg.dutyUnder3[cfg.dutyUnder3.length - 1];
@@ -94,100 +84,167 @@ function calcDutyBlock(cfg, p) {
     return {
       duty, excise: 0, vat: 0, customsFee,
       total: duty + customsFee,
-      method: byPercent >= byCc
-        ? `${(b.percent * 100).toFixed(0)}% от стоимости`
-        : `${b.eurPerCc} €/см³`,
+      method: byPercent >= byCc ? `${(b.percent * 100).toFixed(0)}% от стоимости` : `${b.eurPerCc} €/см³`,
     };
   }
 
-  // --- Старше 3 лет: только ставка €/см³ по возрасту и объёму ---
   const tbl = cfg.dutyOver3[p.age] || cfg.dutyOver3['3-5'];
   const b = tbl.find(r => p.volumeCc <= r.ccMax) || tbl[tbl.length - 1];
   const duty = b.eurPerCc * p.volumeCc * cbrEur;
+  return { duty, excise: 0, vat: 0, customsFee, total: duty + customsFee, method: `${b.eurPerCc} €/см³` };
+}
+
+/* --- Пошлина ЮРЛИЦА (коммерческий импорт): пошлина 15% + акциз + НДС 22% + утиль + сбор.
+ *     Таможенная стоимость = база × (курс ЦБ × (1 + cbrMarkup)). --- */
+function calcJurBlock(cfg, p) {
+  const j = cfg.jur || { dutyPercent: 0.15, cbrMarkup: 0.03, vatPercent: 0.22 };
+  const customsValueRub = p.customsValueRubBase * (1 + j.cbrMarkup); // ×1.03
+  const duty = j.dutyPercent * customsValueRub;                      // 15%
+  const units = p.powerKw / 0.75;                                    // акциз для ДВС И электро
+  const exRow = cfg.exciseEv.find(r => units <= r.unitMax) || cfg.exciseEv[cfg.exciseEv.length - 1];
+  const excise = exRow.rub * units;
+  const vat = j.vatPercent * (customsValueRub + duty + excise);      // 22%
+  const utilCoef = findUtilCoef(cfg, p.isElectric, p.volumeCc, p.powerKw, p.powerHp, p.isOlderThan3, true); // без льготы
+  const utilFee = cfg.utilBase * utilCoef;
+  const customsFee = findCustomsFee(cfg, customsValueRub);
   return {
-    duty, excise: 0, vat: 0, customsFee,
-    total: duty + customsFee,
-    method: `${b.eurPerCc} €/см³`,
+    duty, excise, vat, customsFee, utilFee, utilCoef, customsValueRub,
+    total: duty + excise + vat + utilFee + customsFee,
+    method: `Юрлицо: пошлина ${(j.dutyPercent * 100).toFixed(0)}% + акциз + НДС ${(j.vatPercent * 100).toFixed(0)}% (ЦБ×${(1 + j.cbrMarkup).toFixed(2)})`,
+  };
+}
+
+/* --- Курсы для реального платежа (payRate) и таможенной стоимости (cbrRate) --- */
+function resolveRates(cfg, country, currency) {
+  const m = cfg.rates.market, cbr = cfg.rates.cbr;
+  let payRate, cbrRate;
+  const usdPay = m.USD_VTB, eurPay = m.EUR_SALE;
+  if (country === 'kr') {
+    if (currency === 'USD') { payRate = m.USDT_RUB;              cbrRate = cbr.USD; }
+    else                    { payRate = m.USDT_RUB / m.KRW_USDT; cbrRate = cbr.KRW; } // ₩→USDT→₽
+  } else if (country === 'eu') {
+    payRate = m.EUR_SALE; cbrRate = cbr.EUR;
+  } else { // cn
+    if (currency === 'CNY') { payRate = m.CNY_VTB; cbrRate = cbr.CNY; }
+    else                    { payRate = m.USD_VTB; cbrRate = cbr.USD; }
+  }
+  return { payRate, cbrRate, usdPay, eurPay };
+}
+
+/* --- Страновой блок: реальный платёж + база таможенной стоимости (по ЦБ, без наценки юрлица) ---
+ * Возвращает { carCostRub, customsValueRubBase, foreignLogisticsRub, detail } */
+function computeForeign(cfg, input, rates) {
+  const price = Number(input.carPrice) || 0;
+  if (input.country === 'kr') {
+    const delivery = Number(input.deliveryWon) || 0;
+    const dealer = Number(input.dealerWon) || 0;
+    const sum = price + delivery + dealer;
+    const korVat = (input.korVatPercent != null ? input.korVatPercent : cfg.korea.vatPercent);
+    const vat = sum * korVat;
+    const refund = vat * cfg.korea.vatRefundPercent;
+    return {
+      carCostRub: (sum - refund) * rates.payRate,
+      customsValueRubBase: sum * rates.cbrRate,
+      foreignLogisticsRub: 0,
+      detail: { sum, korVat, vat, refund, pay: sum - refund, delivery, dealer },
+    };
+  }
+  if (input.country === 'eu') {
+    const carCount = Number(input.carCount) || 1;
+    const freight = carCount === 1 ? cfg.europe.freightSingleEur : cfg.europe.freightGroupEur;
+    const foreign = price + freight;
+    return {
+      carCostRub: foreign * rates.payRate,
+      customsValueRubBase: foreign * rates.cbrRate,
+      foreignLogisticsRub: 0,
+      detail: { freight, foreign, carCount },
+    };
+  }
+  // cn
+  const leg1 = Number(input.leg1) || 0, leg2 = Number(input.leg2) || 0;
+  const isCif = !!input.isCif;
+  const legsRub = isCif ? 0 : (leg1 + leg2) * rates.usdPay; // плечи задаются в $
+  const customsBase = isCif
+    ? price * rates.cbrRate
+    : price * rates.cbrRate + (leg1 + leg2) * cfg.rates.cbr.USD; // CIF-база: + доставка по ЦБ$
+  return {
+    carCostRub: price * rates.payRate,
+    customsValueRubBase: customsBase,
+    foreignLogisticsRub: legsRub,
+    detail: { leg1, leg2, isCif, legsRub },
   };
 }
 
 /* =========================================================================
  *  Главная функция расчёта
  *  input = {
- *    country: 'kr' | 'eu',
- *    isElectric: bool,
- *    age: '<3'|'3-5'|'5-7'|'>7'  (для EV: '<3'|'>3'),
- *    volumeCc, powerKw | powerHp,
- *    carPrice,          // Корея: цена у дилера (₩); Европа: цена авто (€)
- *    deliveryWon,       // Корея: доставка по Корее + фрахт (₩)
- *    dealerWon,         // Корея: дилерские расходы (₩)
- *    carCount,          // Европа: 1 | 2  (фрахт 5900 € за 1 авто / 5100 € при консолидации)
- *    commission,        // комиссия компании, ₽ (ручное поле)
- *    extraExpenses,     // доп. расходы, ₽ (ручное поле)
- *    expenses: [{key, label, short, value}],  // расходы по РФ, ₽
- *    logisticsCity,
+ *    country: 'kr'|'eu'|'cn', currency, customsMode, isCif,
+ *    isElectric, age, volumeCc, powerKw|powerHp,
+ *    carPrice, deliveryWon, dealerWon, korVatPercent, carCount, leg1, leg2,
+ *    manualCustoms, manualTransit,           // ручная растаможка (КГ/Белка)
+ *    financingEnabled, financingMonths,
+ *    commission, extraExpenses, expenses, logisticsCity,
  *  }
- *  cfg = { ...CALC_DATA, rates }  (с применёнными переопределениями)
  * ========================================================================= */
 function calculate(input, cfg) {
   cfg = cfg || {};
   cfg = Object.assign({}, CALC_DATA, cfg);
   cfg.rates = cfg.rates || CALC_DATA.defaultRates;
 
-  // --- мощность: нормализуем кВт/л.с. ---
+  // мощность/объём/возраст
   let powerKw = input.powerKw, powerHp = input.powerHp;
   if (powerKw == null && powerHp != null) powerKw = hpToKw(powerHp);
   if (powerHp == null && powerKw != null) powerHp = kwToHp(powerKw);
   powerKw = powerKw || 0; powerHp = powerHp || 0;
-
   const volumeCc = input.volumeCc || 0;
   const isOlderThan3 = input.age !== '<3';
-  const carPrice = Number(input.carPrice) || 0;
+  const isElectric = !!input.isElectric;
 
-  // --- страна: реальный платёж и таможенная стоимость ---
-  let carCostRub, customsValueRub, customsValueEur;
-  let koreanVatWon = 0, vatRefundWon = 0, payWon = 0, sumWon = 0;
-  let freightEur = 0, foreignEur = 0;
-  const carCount = Number(input.carCount) || 1;
+  const country = input.country;
+  const currency = input.currency || (country === 'kr' ? 'KRW' : country === 'eu' ? 'EUR' : 'USD');
+  const mode = input.customsMode || 'phys_rf';
+  const isManual = (mode === 'phys_kg' || mode === 'manual_belka');
+  const rates = resolveRates(cfg, country, currency);
 
-  if (input.country === 'kr') {
-    const deliveryWon = Number(input.deliveryWon) || 0;
-    const dealerWon = Number(input.dealerWon) || 0;
-    sumWon = carPrice + deliveryWon + dealerWon;
-    // корейский НДС 9% и его частичный возврат (40%) при экспорте
-    koreanVatWon = sumWon * cfg.korea.vatPercent;
-    vatRefundWon = koreanVatWon * cfg.korea.vatRefundPercent;
-    payWon = sumWon - vatRefundWon;
-    // реальный платёж: воны → USDT → рубли
-    carCostRub = payWon / cfg.rates.market.KRW_USDT * cfg.rates.market.USDT_RUB;
-    // таможенная стоимость: ЕДИНАЯ база (цена + доставка + дилерские) × курс ЦБ ₩
-    customsValueRub = sumWon * cfg.rates.cbr.KRW;
-    customsValueEur = customsValueRub / cfg.rates.cbr.EUR;
-  } else { // 'eu'
-    freightEur = carCount === 1 ? cfg.europe.freightSingleEur : cfg.europe.freightGroupEur;
-    foreignEur = carPrice + freightEur;
-    // реальный платёж: € × курс «евро продажа»
-    carCostRub = foreignEur * cfg.rates.market.EUR_SALE;
-    // таможенная стоимость по курсу ЦБ EUR (фикс бага листа: там был курс юаня)
-    customsValueRub = foreignEur * cfg.rates.cbr.EUR;
-    customsValueEur = foreignEur;
+  // --- страновой блок ---
+  const F = computeForeign(cfg, input, rates);
+  let carCostRub = F.carCostRub;
+  let foreignLogisticsRub = F.foreignLogisticsRub;
+
+  // --- диспетчер режима таможни ---
+  let cb; // {duty,excise,vat,customsFee,utilFee,utilCoef,total,method,customsValueRub, manual?, manualCustomsRub?, manualLogisticsRub?}
+  if (isManual) {
+    // Белка: € (ТО + логистика); КГ: $ (ТО + транзит) + плечи Китая
+    const modePayRate = (mode === 'manual_belka') ? rates.eurPay : rates.usdPay;
+    const moCustoms = (Number(input.manualCustoms) || 0) * modePayRate;
+    let moLogistics = (Number(input.manualTransit) || 0) * modePayRate;
+    if (mode === 'manual_belka') carCostRub = (Number(input.carPrice) || 0) * rates.payRate; // без фрахта
+    if (country === 'cn') moLogistics += foreignLogisticsRub; // плечи Китай→Бишкек→СПб
+    foreignLogisticsRub = 0; // свёрнуто в moLogistics
+    cb = {
+      manual: true, manualCustomsRub: moCustoms, manualLogisticsRub: moLogistics,
+      duty: 0, excise: 0, vat: 0, customsFee: 0, utilFee: 0, utilCoef: 0,
+      customsValueRub: 0, total: moCustoms + moLogistics, method: 'Ручная растаможка',
+    };
+  } else if (mode === 'jur') {
+    cb = calcJurBlock(cfg, {
+      customsValueRubBase: F.customsValueRubBase,
+      isElectric, volumeCc, powerKw, powerHp, isOlderThan3,
+    });
+  } else { // phys_rf — без изменений (регрессия)
+    const customsValueRub = F.customsValueRubBase;
+    const customsValueEur = customsValueRub / cfg.rates.cbr.EUR;
+    const d = calcDutyBlock(cfg, { isElectric, age: input.age, volumeCc, powerHp, powerKw, customsValueRub, customsValueEur });
+    const utilCoef = findUtilCoef(cfg, isElectric, volumeCc, powerKw, powerHp, isOlderThan3);
+    const utilFee = cfg.utilBase * utilCoef;
+    cb = { ...d, utilFee, utilCoef, customsValueRub, total: d.total + utilFee };
   }
 
-  // --- пошлина / акциз / НДС / сбор ---
-  const duty = calcDutyBlock(cfg, {
-    isElectric: !!input.isElectric,
-    age: input.age,
-    volumeCc, powerHp, powerKw,
-    customsValueRub, customsValueEur,
-  });
-
-  // --- утильсбор ---
-  const utilCoef = findUtilCoef(cfg, !!input.isElectric, volumeCc, powerKw, powerHp, isOlderThan3);
-  const utilFee = cfg.utilBase * utilCoef;
-  // порог льготного утиля + «сколько был бы льготный» — для предупреждения в UI («утиль-ловушка»)
+  // --- утиль-ловушка (только физлицо РФ; юрлицо льготу не получает, ручные — без утиля) ---
   const _prefCoef = cfg.utilPreferentialCoef || { new: 0.17, old: 0.26 };
   const _prefHp = cfg.utilPreferentialHp || { ice: 160, ev: 80 };
-  const utilThresholdHp = input.isElectric ? _prefHp.ev : _prefHp.ice;
+  const utilThresholdHp = isElectric ? _prefHp.ev : _prefHp.ice;
+  const hasUtilTrap = (mode === 'phys_rf');
   const utilPreferentialApplied = powerHp <= utilThresholdHp;
   const utilPreferentialFee = cfg.utilBase * (isOlderThan3 ? _prefCoef.old : _prefCoef.new);
 
@@ -196,67 +253,63 @@ function calculate(input, cfg) {
   const logisticsItem = allExpenses.find(e => e && e.key === 'rf_logistics');
   const logistics = logisticsItem ? (Number(logisticsItem.value) || 0) : 0;
   const logisticsCity = (input.logisticsCity || '').trim();
-  const expenses = allExpenses.filter(e => !(e && e.key === 'rf_logistics')); // услуги без логистики
+  const expenses = allExpenses.filter(e => !(e && e.key === 'rf_logistics'));
   const expensesSum = expenses.reduce((s, e) => s + (Number(e.value) || 0), 0);
 
-  // --- комиссия компании и доп. расходы — ручные поля ---
   const commission = Number(input.commission) || 0;
   const extraExpenses = Number(input.extraExpenses) || 0;
 
-  // суммарные платежи государству (пошлина+акциз+НДС+сбор+утиль)
-  const customsTotal = duty.total + utilFee;
-  // все расходы по РФ (таможня + услуги + логистика)
-  const rfExpenses = customsTotal + expensesSum + logistics;
-  // итого «под ключ»
-  const grandTotal = carCostRub + rfExpenses + commission + extraExpenses;
+  // --- финансирование (рассрочка): +2%/мес от суммы под ключ ---
+  const finPct = (cfg.financing && cfg.financing.percentPerMonth) || 0.02;
+  const months = input.financingEnabled ? (Number(input.financingMonths) || 0) : 0;
+  const base = carCostRub + foreignLogisticsRub + cb.total + expensesSum + logistics + commission + extraExpenses;
+  const financing = finPct * months * base;
+  const grandTotal = base + financing;
+
+  // --- этапы оплаты (mode-aware; Σ этапов === grandTotal) ---
+  let stages;
+  if (isManual) {
+    stages = [
+      { label: 'Депозит (р/с)', short: 'Депозит', value: commission },
+      { label: 'Оплата за авто (инвойс)', short: 'Авто (инвойс)', value: carCostRub },
+      { label: 'Растаможка (ТО)', short: 'Растаможка', value: cb.manualCustomsRub },
+      { label: 'Логистика / транзит и расходы' + (logisticsCity ? ' — ' + logisticsCity : ''),
+        short: 'Логистика+расходы', value: cb.manualLogisticsRub + expensesSum + logistics },
+      { label: 'Доп. расходы', short: 'Доп. расходы', value: extraExpenses },
+    ];
+  } else {
+    stages = [
+      { label: 'Депозит (р/с)', short: 'Депозит', value: commission },
+      { label: 'Оплата за авто (инвойс)', short: 'Авто (инвойс)', value: carCostRub },
+      { label: 'Пошлина / тамож. сбор / утиль (квитанция)', short: 'Пошлина/утиль', value: cb.total },
+      { label: 'Остальные платежи и вывоз' + (logisticsCity ? ' — ' + logisticsCity : ''),
+        short: 'Остальное+вывоз', value: expensesSum + logistics + foreignLogisticsRub },
+      { label: 'Доп. расходы', short: 'Доп. расходы', value: extraExpenses },
+    ];
+  }
+  if (financing > 0) stages.push({ label: `Финансирование (${months} мес × ${(finPct * 100).toFixed(0)}%)`, short: 'Финансирование', value: financing });
 
   return {
-    input: { ...input, powerKw, powerHp, volumeCc },
+    input: { ...input, powerKw, powerHp, volumeCc, currency, customsMode: mode },
+    country, currency, customsMode: mode, isManual, isCif: !!input.isCif,
     carCostRub,
-    customsValueRub,
-    customsValueEur,
-    // Корея: детали для рендера
-    sumWon,
-    koreanVatWon,
-    vatRefundWon,
-    payWon,
-    // Европа: детали для рендера
-    freightEur,
-    foreignEur,
-    carCount,
-    duty: duty.duty,
-    dutyMethod: duty.method,
-    excise: duty.excise,
-    vat: duty.vat,
-    customsFee: duty.customsFee,
-    utilFee,
-    utilCoef,
-    utilThresholdHp,           // порог льготного утиля, л.с. (160 ДВС / 80 EV)
-    utilPreferentialApplied,   // попал ли под льготу (мощность ≤ порога)
-    utilPreferentialFee,       // сколько был бы утиль при льготе (для показа переплаты)
-    customsTotal,        // всё, что уходит на таможне
-    expenses,            // услуги по РФ без логистики
-    expensesSum,
-    logistics,           // логистика по РФ (вынесена отдельно)
-    logisticsCity,       // город доставки по РФ
-    commission,
-    extraExpenses,
-    rfExpenses,
+    foreignLogisticsRub,
+    customsValueRub: cb.customsValueRub,
+    foreign: F.detail,               // страновые детали (kr/eu/cn) для рендера
+    // таможенные платежи
+    duty: cb.duty, dutyMethod: cb.method, excise: cb.excise, vat: cb.vat,
+    customsFee: cb.customsFee, utilFee: cb.utilFee, utilCoef: cb.utilCoef,
+    manual: !!cb.manual, manualCustomsRub: cb.manualCustomsRub || 0, manualLogisticsRub: cb.manualLogisticsRub || 0,
+    customsTotal: cb.total,
+    // утиль-ловушка
+    hasUtilTrap, utilThresholdHp, utilPreferentialApplied, utilPreferentialFee,
+    // расходы РФ
+    expenses, expensesSum, logistics, logisticsCity,
+    commission, extraExpenses,
+    // финансирование
+    financing, financingMonths: months, grandTotalBeforeFinancing: base,
     grandTotal,
-    // этапы оплаты (как на листе «Корея»; без двойного учёта логистики)
-    stages: [
-      { label: 'Депозит (р/с)', short: 'Депозит', value: commission },
-      { label: input.country === 'kr'
-          ? 'Оплата за авто по Корее (инвойс)'
-          : 'Оплата за авто + фрахт (инвойс)',
-        short: 'Авто (инвойс)', value: carCostRub },
-      { label: 'Пошлина / тамож. сбор / утиль (квитанция)', short: 'Пошлина/утиль',
-        value: duty.duty + duty.customsFee + utilFee + duty.excise + duty.vat },
-      { label: 'Остальные платежи и вывоз (физ. карта/счёт)'
-          + (logisticsCity ? ' — ' + logisticsCity : ''),
-        short: 'Остальное+вывоз', value: expensesSum + logistics },
-      { label: 'Оплата в ТК (физ. карта)', short: 'Оплата в ТК', value: extraExpenses },
-    ],
+    stages,
   };
 }
 
@@ -265,5 +318,8 @@ if (typeof window !== 'undefined') {
   window.calculate = calculate;
   window.hpToKw = hpToKw;
   window.kwToHp = kwToHp;
+  window.resolveRates = resolveRates;
+  window.calcJurBlock = calcJurBlock;
+  window.computeForeign = computeForeign;
 }
-if (typeof module !== 'undefined') module.exports = { calculate, hpToKw, kwToHp };
+if (typeof module !== 'undefined') module.exports = { calculate, hpToKw, kwToHp, resolveRates, calcJurBlock, computeForeign, findUtilCoef };

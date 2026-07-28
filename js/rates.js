@@ -106,6 +106,7 @@ async function fetchCbr() {
     USD: round(per1('USD'), 4),
     EUR: round(per1('EUR'), 4),
     KRW: round(per1('KRW'), 7), // за 1 вону (~0.053) — нужна точность
+    CNY: round(per1('CNY'), 4), // за 1 юань — таможенная стоимость Китая
   };
   const cache = { rates, date: data.Date, fetchedAt: Date.now() };
   setCbrCache(cache);

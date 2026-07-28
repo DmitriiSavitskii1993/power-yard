@@ -41,7 +41,24 @@
       <div class="segmented" id="countryTabs">
         <button class="seg active" data-country="kr">🇰🇷 Корея</button>
         <button class="seg" data-country="eu">🇪🇺 Европа</button>
+        <button class="seg" data-country="cn">🇨🇳 Китай</button>
       </div>
+
+      <!-- Валюта и схема растаможки -->
+      <section class="card">
+        <div class="field" id="fieldCurrency">
+          <label for="currency">Валюта оплаты</label>
+          <select id="currency"></select>
+        </div>
+        <div class="field">
+          <label for="customsMode">Схема растаможки</label>
+          <select id="customsMode"></select>
+        </div>
+        <label class="switch-row hidden" id="fieldCif">
+          <span>CIF СПб <small>(доставка уже в цене)</small></span>
+          <input type="checkbox" id="isCif" class="switch">
+        </label>
+      </section>
 
       <!-- Опции авто (компактно) -->
       <section class="card toggles">
@@ -93,12 +110,17 @@
 
         <!-- Корея: доставка и дилерские -->
         <div class="field" id="fieldDeliveryWon">
-          <label for="deliveryWon">Доставка по Корее + фрахт, ₩</label>
+          <label for="deliveryWon">Доставка по Корее + фрахт, <span id="curLabelKrD" class="cur">₩</span></label>
           <input type="number" id="deliveryWon" inputmode="numeric" placeholder="1300000">
         </div>
         <div class="field" id="fieldDealerWon">
-          <label for="dealerWon">Дилерские расходы, ₩</label>
+          <label for="dealerWon">Дилерские расходы, <span id="curLabelKrDl" class="cur">₩</span></label>
           <input type="number" id="dealerWon" inputmode="numeric" placeholder="440000">
+        </div>
+        <!-- Корея: редактируемый % НДС (у разных поставщиков разный) -->
+        <div class="field" id="fieldKorVat">
+          <label for="korVat">НДС Кореи, % <span class="cur">(возврат 40%)</span></label>
+          <input type="number" id="korVat" inputmode="decimal" placeholder="9" value="9">
         </div>
         <p class="hint hidden" id="krVatInfo"></p>
 
@@ -106,6 +128,26 @@
         <div class="field hidden" id="fieldFreight">
           <label for="freightEur">Фрахт, € <span class="cur">(автоматически)</span></label>
           <input type="number" id="freightEur" inputmode="numeric" readonly>
+        </div>
+
+        <!-- Китай: плечи логистики (в $) -->
+        <div class="field hidden" id="fieldLeg1">
+          <label for="leg1">Логистика Китай → Бишкек, $</label>
+          <input type="number" id="leg1" inputmode="numeric" placeholder="1000">
+        </div>
+        <div class="field hidden" id="fieldLeg2">
+          <label for="leg2">Логистика Бишкек → СПб, $</label>
+          <input type="number" id="leg2" inputmode="numeric" placeholder="1800">
+        </div>
+
+        <!-- Ручная растаможка (через КГ / Белку) -->
+        <div class="field hidden" id="fieldManualCustoms">
+          <label for="manualCustoms">Стоимость растаможки (ТО) <span id="manualCur1" class="cur">$</span></label>
+          <input type="number" id="manualCustoms" inputmode="numeric" placeholder="0">
+        </div>
+        <div class="field hidden" id="fieldManualTransit">
+          <label for="manualTransit">Транзит / логистика <span id="manualCur2" class="cur">$</span></label>
+          <input type="number" id="manualTransit" inputmode="numeric" placeholder="0">
         </div>
       </section>
 
@@ -121,6 +163,18 @@
         <div class="field">
           <label for="extraExpenses">Доп. расходы, ₽</label>
           <input type="number" id="extraExpenses" inputmode="numeric" placeholder="0">
+        </div>
+      </section>
+
+      <!-- Финансирование (рассрочка) -->
+      <section class="card">
+        <label class="switch-row">
+          <span>Финансирование <small>(+2% в месяц)</small></span>
+          <input type="checkbox" id="financingEnabled" class="switch">
+        </label>
+        <div class="field hidden" id="fieldFinMonths">
+          <label for="finMonths">Срок финансирования, месяцев</label>
+          <input type="number" id="finMonths" inputmode="numeric" placeholder="6">
         </div>
       </section>
 
@@ -143,6 +197,7 @@
           <label>USD <input type="text" inputmode="decimal" data-rate="cbr.USD"></label>
           <label>EUR <input type="text" inputmode="decimal" data-rate="cbr.EUR"></label>
           <label>KRW (за 1 ₩) <input type="text" inputmode="decimal" data-rate="cbr.KRW"></label>
+          <label>CNY <input type="text" inputmode="decimal" data-rate="cbr.CNY"></label>
         </div>
       </section>
 
@@ -152,8 +207,10 @@
           <label>₩ за 1 USDT <input type="text" inputmode="decimal" data-rate="market.KRW_USDT"></label>
           <label>USDT → ₽ <input type="text" inputmode="decimal" data-rate="market.USDT_RUB"></label>
           <label>€ продажа, ₽ <input type="text" inputmode="decimal" data-rate="market.EUR_SALE"></label>
+          <label>$ ВТБ, ₽ <input type="text" inputmode="decimal" data-rate="market.USD_VTB"></label>
+          <label>¥ ВТБ, ₽ <input type="text" inputmode="decimal" data-rate="market.CNY_VTB"></label>
         </div>
-        <p class="hint">Корея: оплата вон через USDT (два курса). Европа: платёж по курсу «€ продажа». Таможня всегда по ЦБ.</p>
+        <p class="hint">Корея: оплата вон через USDT. Европа: «€ продажа». Китай: курс ВТБ ($/¥). Таможня всегда по ЦБ.</p>
       </section>
 
       <section class="card">
@@ -162,7 +219,18 @@
           <label>Пошлина, % <input type="text" inputmode="decimal" data-ev="evDutyPercent"></label>
           <label>НДС, % <input type="text" inputmode="decimal" data-ev="evVatPercent"></label>
         </div>
-        <p class="hint">Расчёт электрокаров: пошлина 15% + акциз (НК РФ ст.193) + НДС 22% (ставки 2026). Здесь можно поправить ставки при изменении закона.</p>
+        <p class="hint">Расчёт электрокаров: пошлина 15% + акциз (НК РФ ст.193) + НДС 22% (ставки 2026).</p>
+      </section>
+
+      <section class="card">
+        <div class="card-head">Юрлицо и финансирование</div>
+        <div class="grid2">
+          <label>Пошлина юрлица, % <input type="text" inputmode="decimal" data-jur="dutyPercent"></label>
+          <label>НДС юрлица, % <input type="text" inputmode="decimal" data-jur="vatPercent"></label>
+          <label>Наценка к ЦБ, % <input type="text" inputmode="decimal" data-jur="cbrMarkup"></label>
+          <label>Финансир., %/мес <input type="text" inputmode="decimal" data-fin="percentPerMonth"></label>
+        </div>
+        <p class="hint">Юрлицо: таможенная стоимость по курсу ЦБ + наценка. Проценты вводятся как доля (0.15 = 15%).</p>
       </section>
 
       <div class="settings-actions">

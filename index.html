@@ -42,6 +42,7 @@
         <button class="seg active" data-country="kr">🇰🇷 Корея</button>
         <button class="seg" data-country="eu">🇪🇺 Европа</button>
         <button class="seg" data-country="cn">🇨🇳 Китай</button>
+        <button class="seg" data-country="ge">🇬🇪 Грузия</button>
       </div>
 
       <!-- Валюта и схема растаможки -->
@@ -124,20 +125,26 @@
         </div>
         <p class="hint hidden" id="krVatInfo"></p>
 
-        <!-- Европа: фрахт (автоматически по количеству авто) -->
+        <!-- Европа: фрахт (автодефолт по количеству авто, редактируется) -->
         <div class="field hidden" id="fieldFreight">
-          <label for="freightEur">Фрахт, € <span class="cur">(автоматически)</span></label>
-          <input type="number" id="freightEur" inputmode="numeric" readonly>
+          <label for="freightEur">Фрахт, € <span class="cur">(можно менять)</span></label>
+          <input type="number" id="freightEur" inputmode="numeric">
         </div>
 
-        <!-- Китай: плечи логистики (в $) -->
+        <!-- Китай: плечи логистики (в валюте цены) -->
         <div class="field hidden" id="fieldLeg1">
-          <label for="leg1">Логистика Китай → Бишкек, $</label>
+          <label for="leg1">Логистика Китай → Бишкек, <span id="curLabelLeg1" class="cur">$</span></label>
           <input type="number" id="leg1" inputmode="numeric" placeholder="1000">
         </div>
         <div class="field hidden" id="fieldLeg2">
-          <label for="leg2">Логистика Бишкек → СПб, $</label>
+          <label for="leg2">Логистика Бишкек → СПб, <span id="curLabelLeg2" class="cur">$</span></label>
           <input type="number" id="leg2" inputmode="numeric" placeholder="1800">
+        </div>
+
+        <!-- Грузия: логистика до РФ (в $) -->
+        <div class="field hidden" id="fieldGeLogistics">
+          <label for="geLogistics">Логистика до РФ, $</label>
+          <input type="number" id="geLogistics" inputmode="numeric" placeholder="1000">
         </div>
 
         <!-- Ручная растаможка (через КГ / Белку) -->
@@ -163,6 +170,18 @@
         <div class="field">
           <label for="extraExpenses">Доп. расходы, ₽</label>
           <input type="number" id="extraExpenses" inputmode="numeric" placeholder="0">
+        </div>
+      </section>
+
+      <!-- Комиссия платёжного агента -->
+      <section class="card">
+        <label class="switch-row">
+          <span>Комиссия платёжного агента <small>(% от инвойса)</small></span>
+          <input type="checkbox" id="agentEnabled" class="switch">
+        </label>
+        <div class="field hidden" id="fieldAgentPercent">
+          <label for="agentPercent">Комиссия агента, %</label>
+          <input type="number" id="agentPercent" inputmode="decimal" placeholder="2" value="2">
         </div>
       </section>
 
@@ -229,6 +248,7 @@
           <label>НДС юрлица, % <input type="text" inputmode="decimal" data-jur="vatPercent"></label>
           <label>Наценка к ЦБ, % <input type="text" inputmode="decimal" data-jur="cbrMarkup"></label>
           <label>Финансир., %/мес <input type="text" inputmode="decimal" data-fin="percentPerMonth"></label>
+          <label>Комиссия агента <input type="text" inputmode="decimal" data-agent="percent"></label>
         </div>
         <p class="hint">Юрлицо: таможенная стоимость по курсу ЦБ + наценка. Проценты вводятся как доля (0.15 = 15%).</p>
       </section>

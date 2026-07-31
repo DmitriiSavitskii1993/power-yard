@@ -124,6 +124,8 @@ function resolveRates(cfg, country, currency) {
     else                    { payRate = m.USDT_RUB / m.KRW_USDT; cbrRate = cbr.KRW; } // ₩→USDT→₽
   } else if (country === 'eu') {
     payRate = m.EUR_SALE; cbrRate = cbr.EUR;
+  } else if (country === 'ge') {
+    payRate = m.USD_VTB; cbrRate = cbr.USD; // Грузия: закуп/логистика в $
   } else { // cn
     if (currency === 'CNY') { payRate = m.CNY_VTB; cbrRate = cbr.CNY; }
     else                    { payRate = m.USD_VTB; cbrRate = cbr.USD; }
@@ -151,7 +153,10 @@ function computeForeign(cfg, input, rates) {
   }
   if (input.country === 'eu') {
     const carCount = Number(input.carCount) || 1;
-    const freight = carCount === 1 ? cfg.europe.freightSingleEur : cfg.europe.freightGroupEur;
+    // фрахт: ручной ввод переопределяет автодефолт по количеству авто
+    const freight = (input.freightEur != null && input.freightEur !== '')
+      ? Number(input.freightEur)
+      : (carCount === 1 ? cfg.europe.freightSingleEur : cfg.europe.freightGroupEur);
     const foreign = price + freight;
     return {
       carCostRub: foreign * rates.payRate,
@@ -160,13 +165,23 @@ function computeForeign(cfg, input, rates) {
       detail: { freight, foreign, carCount },
     };
   }
-  // cn
+  if (input.country === 'ge') {
+    // Грузия: закуп $ + логистика до РФ $ (входит в таможенную стоимость)
+    const logistics = Number(input.geLogistics) || 0;
+    return {
+      carCostRub: price * rates.payRate,
+      customsValueRubBase: price * rates.cbrRate + logistics * rates.cbrRate,
+      foreignLogisticsRub: logistics * rates.payRate,
+      detail: { logistics },
+    };
+  }
+  // cn — два плеча логистики в валюте цены ($ или ¥)
   const leg1 = Number(input.leg1) || 0, leg2 = Number(input.leg2) || 0;
   const isCif = !!input.isCif;
-  const legsRub = isCif ? 0 : (leg1 + leg2) * rates.usdPay; // плечи задаются в $
+  const legsRub = isCif ? 0 : (leg1 + leg2) * rates.payRate;
   const customsBase = isCif
     ? price * rates.cbrRate
-    : price * rates.cbrRate + (leg1 + leg2) * cfg.rates.cbr.USD; // CIF-база: + доставка по ЦБ$
+    : price * rates.cbrRate + (leg1 + leg2) * rates.cbrRate; // CIF-база: + доставка по ЦБ той же валюты
   return {
     carCostRub: price * rates.payRate,
     customsValueRubBase: customsBase,
@@ -219,7 +234,7 @@ function calculate(input, cfg) {
     const moCustoms = (Number(input.manualCustoms) || 0) * modePayRate;
     let moLogistics = (Number(input.manualTransit) || 0) * modePayRate;
     if (mode === 'manual_belka') carCostRub = (Number(input.carPrice) || 0) * rates.payRate; // без фрахта
-    if (country === 'cn') moLogistics += foreignLogisticsRub; // плечи Китай→Бишкек→СПб
+    if (country === 'cn' || country === 'ge') moLogistics += foreignLogisticsRub; // плечи Китая / логистика Грузии
     foreignLogisticsRub = 0; // свёрнуто в moLogistics
     cb = {
       manual: true, manualCustomsRub: moCustoms, manualLogisticsRub: moLogistics,
@@ -259,10 +274,18 @@ function calculate(input, cfg) {
   const commission = Number(input.commission) || 0;
   const extraExpenses = Number(input.extraExpenses) || 0;
 
-  // --- финансирование (рассрочка): +2%/мес от суммы под ключ ---
+  // --- комиссия платёжного агента: % от инвойса за авто (цена × курс оплаты) ---
+  const agentDefault = (cfg.paymentAgent && cfg.paymentAgent.percent) || 0.02;
+  const agentPercent = input.agentEnabled
+    ? (input.agentPercent != null ? Number(input.agentPercent) : agentDefault)
+    : 0;
+  const invoiceRub = (Number(input.carPrice) || 0) * rates.payRate;
+  const agentFee = agentPercent * invoiceRub;
+
+  // --- финансирование (рассрочка): +2%/мес от суммы под ключ (включая комиссию агента) ---
   const finPct = (cfg.financing && cfg.financing.percentPerMonth) || 0.02;
   const months = input.financingEnabled ? (Number(input.financingMonths) || 0) : 0;
-  const base = carCostRub + foreignLogisticsRub + cb.total + expensesSum + logistics + commission + extraExpenses;
+  const base = carCostRub + foreignLogisticsRub + cb.total + expensesSum + logistics + commission + extraExpenses + agentFee;
   const financing = finPct * months * base;
   const grandTotal = base + financing;
 
@@ -287,6 +310,7 @@ function calculate(input, cfg) {
       { label: 'Доп. расходы', short: 'Доп. расходы', value: extraExpenses },
     ];
   }
+  if (agentFee > 0) stages.push({ label: `Комиссия платёжного агента (${(agentPercent * 100).toFixed(1).replace('.0', '')}%)`, short: 'Комиссия агента', value: agentFee });
   if (financing > 0) stages.push({ label: `Финансирование (${months} мес × ${(finPct * 100).toFixed(0)}%)`, short: 'Финансирование', value: financing });
 
   return {
@@ -306,6 +330,8 @@ function calculate(input, cfg) {
     // расходы РФ
     expenses, expensesSum, logistics, logisticsCity,
     commission, extraExpenses,
+    // комиссия платёжного агента
+    agentFee, agentPercent,
     // финансирование
     financing, financingMonths: months, grandTotalBeforeFinancing: base,
     grandTotal,

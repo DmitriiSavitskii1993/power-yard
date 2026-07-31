@@ -34,6 +34,7 @@ const RATE_FIELDS = {
   kr: [ { key: 'KRW_USDT', label: '₩ за 1 USDT' }, { key: 'USDT_RUB', label: 'USDT → ₽' } ],
   eu: [ { key: 'EUR_SALE', label: '€ продажа, ₽' } ],
   cn: [ { key: 'USD_VTB', label: '$ ВТБ, ₽' }, { key: 'CNY_VTB', label: '¥ ВТБ, ₽' } ],
+  ge: [ { key: 'USD_VTB', label: '$ ВТБ, ₽' } ],
 };
 
 /* --- утилиты --- */
@@ -112,8 +113,12 @@ function captureInputs() {
     leg2: $('#leg2') ? $('#leg2').value : '',
     manualCustoms: $('#manualCustoms') ? $('#manualCustoms').value : '',
     manualTransit: $('#manualTransit') ? $('#manualTransit').value : '',
+    freightEur: $('#freightEur') ? $('#freightEur').value : '',
+    geLogistics: $('#geLogistics') ? $('#geLogistics').value : '',
     financingEnabled: $('#financingEnabled') ? $('#financingEnabled').checked : false,
     finMonths: $('#finMonths') ? $('#finMonths').value : '',
+    agentEnabled: $('#agentEnabled') ? $('#agentEnabled').checked : false,
+    agentPercent: $('#agentPercent') ? $('#agentPercent').value : '',
   };
 }
 /* сохранить текущие поля под текущую страну */
@@ -140,6 +145,11 @@ function applyFieldInputs(saved) {
   if ($('#financingEnabled')) $('#financingEnabled').checked = !!saved.financingEnabled;
   if ($('#finMonths')) $('#finMonths').value = saved.finMonths != null ? saved.finMonths : '';
   $('#fieldFinMonths').classList.toggle('hidden', !($('#financingEnabled') && $('#financingEnabled').checked));
+  // комиссия платёжного агента
+  if ($('#agentEnabled')) $('#agentEnabled').checked = !!saved.agentEnabled;
+  if ($('#agentPercent')) $('#agentPercent').value = (saved.agentPercent != null && saved.agentPercent !== '')
+    ? saved.agentPercent : (cfg.paymentAgent.percent * 100);
+  $('#fieldAgentPercent').classList.toggle('hidden', !($('#agentEnabled') && $('#agentEnabled').checked));
   if (state.country === 'kr') {
     // Корея: воновые дефолты доставки/дилерских — только при валюте ₩ (иначе оставить сохранённое/пусто,
     // чтобы 1 300 000 не трактовалось как $1.3 млн при валюте USD)
@@ -153,10 +163,14 @@ function applyFieldInputs(saved) {
     updateKrVatInfo();
   } else if (state.country === 'eu') {
     if ($('#carCount')) $('#carCount').value = saved.carCount || '1';
-    updateFreightEu();
-  } else { // cn
+    if ($('#freightEur')) $('#freightEur').value = saved.freightEur != null ? saved.freightEur : '';
+    updateFreightEu();  // заполнит фрахт дефолтом, если поле пустое
+  } else if (state.country === 'cn') {
     $('#leg1').value = (saved.leg1 != null && saved.leg1 !== '') ? saved.leg1 : cfg.china.defaultLeg1Usd;
     $('#leg2').value = (saved.leg2 != null && saved.leg2 !== '') ? saved.leg2 : cfg.china.defaultLeg2Usd;
+  } else if (state.country === 'ge') {
+    $('#geLogistics').value = (saved.geLogistics != null && saved.geLogistics !== '')
+      ? saved.geLogistics : cfg.georgia.defaultLogisticsUsd;
   }
 }
 /* загрузить сохранённые поля выбранной страны в состояние + форму */
@@ -303,7 +317,7 @@ function renderCountry() {
 /* показ/скрытие полей по стране и режиму растаможки */
 function renderModeFields() {
   const country = state.country, mode = state.customsMode;
-  const isKr = country === 'kr', isEu = country === 'eu', isCn = country === 'cn';
+  const isKr = country === 'kr', isEu = country === 'eu', isCn = country === 'cn', isGe = country === 'ge';
   const isManual = (mode === 'phys_kg' || mode === 'manual_belka');
   const computed = !isManual; // phys_rf / jur — считаем пошлину/утиль
 
@@ -322,9 +336,14 @@ function renderModeFields() {
   $('#fieldLeg1').classList.toggle('hidden', !(isCn && !state.isCif));
   $('#fieldLeg2').classList.toggle('hidden', !(isCn && !state.isCif));
   $('#isCif').checked = state.isCif;
+  // валютные подписи плеч Китая (в валюте цены — $ или ¥)
+  if (isCn) { const s = curSym(); $('#curLabelLeg1').textContent = s; $('#curLabelLeg2').textContent = s; }
+  // Грузия: логистика до РФ ($)
+  $('#fieldGeLogistics').classList.toggle('hidden', !isGe);
   // Ручная растаможка (КГ/Белка): поля стоимости ТО + транзита
   $('#fieldManualCustoms').classList.toggle('hidden', !isManual);
-  $('#fieldManualTransit').classList.toggle('hidden', !isManual);
+  // транзит-поле не нужно для Грузии (логистика в geLogistics) и Китая (плечи) — там логистика отдельно
+  $('#fieldManualTransit').classList.toggle('hidden', !(isManual && !isCn && !isGe));
   const manCur = (mode === 'manual_belka') ? '€' : '$';
   $('#manualCur1').textContent = manCur;
   $('#manualCur2').textContent = manCur;
@@ -348,10 +367,14 @@ function updateRateSummary() {
   else $('#rateSummary').textContent = `$ ${m.USD_VTB} ₽ · ¥ ${m.CNY_VTB} ₽`;
 }
 
-/* Европа: фрахт по количеству авто (5 900 € за одиночное авто / 5 100 € при консолидации) */
-function updateFreightEu() {
+/* Европа: авто-дефолт фрахта по количеству авто. force=true (смена кол-ва) перезаписывает
+ * ручной ввод; без force — только заполняет пустое поле (не затирает ручное значение). */
+function updateFreightEu(force) {
+  const el = $('#freightEur');
+  if (!el) return;
+  if (!force && el.value !== '') return;
   const cnt = $('#carCount') ? Number($('#carCount').value) || 1 : 1;
-  $('#freightEur').value = cnt === 1 ? cfg.europe.freightSingleEur : cfg.europe.freightGroupEur;
+  el.value = cnt === 1 ? cfg.europe.freightSingleEur : cfg.europe.freightGroupEur;
 }
 
 /* Корея: живая строка «НДС % · возврат 40% · к оплате» под полями цены */
@@ -453,14 +476,21 @@ function bindEvents() {
     hideResult();
   });
 
+  // Комиссия платёжного агента: показать/скрыть поле процента
+  $('#agentEnabled').addEventListener('change', (e) => {
+    $('#fieldAgentPercent').classList.toggle('hidden', !e.target.checked);
+    persistInputs();
+    hideResult();
+  });
+
   // Корея: живая строка НДС при вводе цены/доставки/дилерских/процента
   ['#carPrice', '#deliveryWon', '#dealerWon', '#korVat'].forEach(sel => {
     $(sel).addEventListener('input', () => { if (state.country === 'kr') updateKrVatInfo(); });
   });
 
-  // Европа: фрахт по количеству авто
+  // Европа: смена количества авто перезаписывает фрахт авто-дефолтом
   $('#carCount').addEventListener('change', () => {
-    updateFreightEu();
+    updateFreightEu(true);
     persistInputs();
     hideResult();
   });
@@ -489,7 +519,7 @@ function bindEvents() {
   // запоминать последние введённые поля
   $('#screenCalc').addEventListener('change', (e) => {
     const t = e.target;
-    if (t && t.matches && t.matches('#age, #volume, #power, #carPrice, #deliveryWon, #dealerWon, #carCount, #commission, #extraExpenses, #logCity, #korVat, #leg1, #leg2, #manualCustoms, #manualTransit, #finMonths')) {
+    if (t && t.matches && t.matches('#age, #volume, #power, #carPrice, #deliveryWon, #dealerWon, #carCount, #commission, #extraExpenses, #logCity, #korVat, #leg1, #leg2, #manualCustoms, #manualTransit, #finMonths, #freightEur, #geLogistics, #agentPercent')) {
       if (t.id === 'logCity') state.logisticsCity = t.value;
       persistInputs();
     }
@@ -603,10 +633,14 @@ function onCalculate() {
     dealerWon: state.country === 'kr' ? num('#dealerWon') : 0,
     korVatPercent: state.country === 'kr' ? (num('#korVat') / 100) : undefined,
     carCount: state.country === 'eu' ? (Number($('#carCount').value) || 1) : 1,
+    freightEur: state.country === 'eu' ? ($('#freightEur').value !== '' ? num('#freightEur') : null) : null,
     leg1: state.country === 'cn' ? num('#leg1') : 0,
     leg2: state.country === 'cn' ? num('#leg2') : 0,
+    geLogistics: state.country === 'ge' ? num('#geLogistics') : 0,
     manualCustoms: isManual ? num('#manualCustoms') : 0,
     manualTransit: isManual ? num('#manualTransit') : 0,
+    agentEnabled: $('#agentEnabled').checked,
+    agentPercent: $('#agentEnabled').checked ? (num('#agentPercent') / 100) : 0,
     financingEnabled: $('#financingEnabled').checked,
     financingMonths: num('#finMonths'),
     commission: num('#commission'),
@@ -630,9 +664,9 @@ function onCalculate() {
 }
 
 /* родительный падеж страны + флаг для подзаголовка */
-const COUNTRY_GEN = { kr: 'Корее 🇰🇷', eu: 'Европе 🇪🇺', cn: 'Китаю 🇨🇳' };
-const COUNTRY_UP = { kr: 'КОРЕЕ', eu: 'ЕВРОПЕ', cn: 'КИТАЮ' };
-const FLAGS = { kr: '🇰🇷', eu: '🇪🇺', cn: '🇨🇳' };
+const COUNTRY_GEN = { kr: 'Корее 🇰🇷', eu: 'Европе 🇪🇺', cn: 'Китаю 🇨🇳', ge: 'Грузии 🇬🇪' };
+const COUNTRY_UP = { kr: 'КОРЕЕ', eu: 'ЕВРОПЕ', cn: 'КИТАЮ', ge: 'ГРУЗИИ' };
+const FLAGS = { kr: '🇰🇷', eu: '🇪🇺', cn: '🇨🇳', ge: '🇬🇪' };
 const MODE_LABEL = { phys_rf: 'Физлицо РФ', phys_kg: 'Физлицо КГ', jur: 'Юрлицо', manual_belka: 'Через Белку' };
 
 /* строка курса для экрана (по стране и валюте) */
@@ -693,12 +727,16 @@ function renderResult(r) {
     const freightRow = r.isManual ? '' :
       `<div class="row sub"><span class="k">Фрахт (${f.carCount === 1 ? '1 авто' : 'консолидация'})</span><span class="v">${fmtNum(f.freight)} ${cur}</span></div>`;
     foreignRows = priceRow + freightRow + rateRows;
-  } else { // cn
+  } else if (c === 'cn') {
     const legsRow = (r.isCif || !(f.leg1 || f.leg2)) ? '' :
-      `<div class="row sub"><span class="k">Логистика Китай→Бишкек→СПб</span><span class="v">${fmtNum((f.leg1 || 0) + (f.leg2 || 0))} $</span></div>`;
+      `<div class="row sub"><span class="k">Логистика Китай→Бишкек→СПб</span><span class="v">${fmtNum((f.leg1 || 0) + (f.leg2 || 0))} ${cur}</span></div>`;
     const cifRow = r.isCif ? `<div class="row sub" style="color:var(--hint);font-size:12px">Цена включает доставку до СПб (CIF)</div>` : '';
     foreignRows = priceRow + legsRow + cifRow + rateRows;
+  } else { // ge — логистика показывается отдельной секцией foreignLogisticsRub
+    foreignRows = priceRow + rateRows;
   }
+  // подпись секции «логистика за границей» по стране
+  const foreignLogLabel = (c === 'ge') ? 'Логистика до РФ' : 'Логистика Китай→Бишкек→СПб';
 
   // --- таможенный блок (по режиму) ---
   let customsSection = '';
@@ -720,8 +758,11 @@ function renderResult(r) {
     ${utilFlag}`;
   }
 
+  // комиссия агента и финансирование — отдельными подытогами (для сходимости Σ секций = ИТОГО)
+  const agentRow = r.agentFee > 0
+    ? `<div class="sec-head"><span>💳 Комиссия агента (${(r.agentPercent * 100).toFixed(1).replace('.0', '')}%)</span><span class="sec-sum">${fmt(r.agentFee)}</span></div>` : '';
   const finRow = r.financing > 0
-    ? `<div class="row sub"><span class="k">Финансирование (${r.financingMonths} мес × ${Math.round((cfg.financing.percentPerMonth || 0.02) * 100)}%)</span><span class="v">${fmt(r.financing)}</span></div>` : '';
+    ? `<div class="sec-head"><span>💳 Финансирование (${r.financingMonths} мес × ${Math.round((cfg.financing.percentPerMonth || 0.02) * 100)}%)</span><span class="sec-sum">${fmt(r.financing)}</span></div>` : '';
 
   $('#result').innerHTML = `
     <div class="total">
@@ -732,7 +773,7 @@ function renderResult(r) {
     <div class="sec-head"><span>Расходы по ${COUNTRY_GEN[c]}</span><span class="sec-sum">${fmt(r.carCostRub)}</span></div>
     ${foreignRows}
 
-    ${r.foreignLogisticsRub > 0 ? `<div class="sec-head"><span>🚚 Логистика (Китай→Бишкек→СПб)</span><span class="sec-sum">${fmt(r.foreignLogisticsRub)}</span></div>` : ''}
+    ${r.foreignLogisticsRub > 0 ? `<div class="sec-head"><span>🚚 ${foreignLogLabel}</span><span class="sec-sum">${fmt(r.foreignLogisticsRub)}</span></div>` : ''}
 
     ${customsSection}
 
@@ -742,6 +783,7 @@ function renderResult(r) {
     ${r.extraExpenses > 0 ? `<div class="row sub"><span class="k">Доп. расходы</span><span class="v">${fmt(r.extraExpenses)}</span></div>` : ''}
     ${r.logistics > 0 ? `
     <div class="sec-head"><span>🚚 Логистика по РФ${r.logisticsCity ? ' — ' + escapeAttr(r.logisticsCity) : ''}</span><span class="sec-sum">${fmt(r.logistics)}</span></div>` : ''}
+    ${agentRow}
     ${finRow}
 
     <div class="row grand"><span class="k">ИТОГО под ключ</span><span class="v">${fmt(r.grandTotal)}</span></div>
@@ -792,17 +834,17 @@ function buildTableLines(r, withStages) {
     foreignItems.push(['  К оплате', fmtNum(f.pay) + ' ' + cur]);
   } else if (c === 'eu') {
     if (!r.isManual) foreignItems.push([`  Фрахт (${f.carCount === 1 ? '1 авто' : 'консолид.'})`, fmtNum(f.freight) + ' ' + cur]);
-  } else { // cn
+  } else if (c === 'cn') {
     if (r.isCif) foreignItems.push(['  (CIF СПб)', 'в цене']);
-    else if (f.leg1 || f.leg2) foreignItems.push(['  Логистика (плечи)', fmtNum((f.leg1 || 0) + (f.leg2 || 0)) + ' $']);
-  }
+    else if (f.leg1 || f.leg2) foreignItems.push(['  Логистика (плечи)', fmtNum((f.leg1 || 0) + (f.leg2 || 0)) + ' ' + cur]);
+  } // ge — логистика отдельной секцией ниже
   foreignItems.push(['  Курс', rateCopy(r, mk)]);
   foreignItems.push(['  В рублях', money(r.carCostRub)]);
   sections.push({ head: ['РАСХОДЫ ПО ' + COUNTRY_UP[c], money(r.carCostRub)], items: foreignItems });
 
-  // логистика Китая (плечи) — отдельным рублёвым подытогом, чтобы разбивка сходилась с ИТОГО
+  // логистика за границей (плечи Китая / логистика Грузии) — отдельным рублёвым подытогом
   if (r.foreignLogisticsRub > 0) {
-    sections.push({ head: ['ЛОГИСТИКА (КИТАЙ→СПб)', money(r.foreignLogisticsRub)], items: [] });
+    sections.push({ head: [(c === 'ge' ? 'ЛОГИСТИКА ДО РФ' : 'ЛОГИСТИКА (КИТАЙ→СПб)'), money(r.foreignLogisticsRub)], items: [] });
   }
 
   if (r.isManual) {
@@ -826,7 +868,10 @@ function buildTableLines(r, withStages) {
     const logItems = r.logisticsCity ? [['  Город', r.logisticsCity]] : [];
     sections.push({ head: ['ЛОГИСТИКА ПО РФ', money(r.logistics)], items: logItems });
   }
-  // финансирование — отдельной строкой
+  // комиссия агента и финансирование — отдельными подытогами
+  if (r.agentFee > 0) {
+    sections.push({ head: ['КОМИССИЯ АГЕНТА (' + (r.agentPercent * 100).toFixed(1).replace('.0', '') + '%)', money(r.agentFee)], items: [] });
+  }
   if (r.financing > 0) {
     sections.push({ head: ['ФИНАНСИРОВАНИЕ (' + r.financingMonths + ' мес)', money(r.financing)], items: [] });
   }
@@ -910,13 +955,13 @@ function buildShareText(r, withStages) {
     t += `• К оплате: ${fmtNum(f.pay)} ${cur}\n`;
   } else if (c === 'eu') {
     if (!r.isManual) t += `• Фрахт (${f.carCount === 1 ? '1 авто' : 'консолидация'}): ${fmtNum(f.freight)} ${cur}\n`;
-  } else { // cn
+  } else if (c === 'cn') {
     if (r.isCif) t += `• Доставка: включена в цену (CIF СПб)\n`;
-    else if (f.leg1 || f.leg2) t += `• Логистика Китай→Бишкек→СПб: ${fmtNum((f.leg1 || 0) + (f.leg2 || 0))} $\n`;
-  }
+    else if (f.leg1 || f.leg2) t += `• Логистика Китай→Бишкек→СПб: ${fmtNum((f.leg1 || 0) + (f.leg2 || 0))} ${cur}\n`;
+  } // ge — логистика строкой ниже
   t += `• Курс: ${rateCopy(r, m)}\n`;
   t += `• В рублях: ${money(r.carCostRub)}\n`;
-  if (r.foreignLogisticsRub > 0) t += `\n🚚 Логистика Китай→Бишкек→СПб: ${money(r.foreignLogisticsRub)}\n`;
+  if (r.foreignLogisticsRub > 0) t += `\n🚚 ${c === 'ge' ? 'Логистика до РФ' : 'Логистика Китай→Бишкек→СПб'}: ${money(r.foreignLogisticsRub)}\n`;
   if (r.isManual) {
     t += `\n🛃 Растаможка (${MODE_LABEL[r.customsMode]}): ${money(r.customsTotal)}\n`;
     t += `• Стоимость растаможки (ТО): ${money(r.manualCustomsRub)}\n`;
@@ -932,6 +977,7 @@ function buildShareText(r, withStages) {
   t += `• Комиссия компании: ${money(r.commission)}\n`;
   if (r.extraExpenses > 0) t += `• Доп. расходы: ${money(r.extraExpenses)}\n`;
   if (r.logistics > 0) t += `\n🚚 Логистика по РФ${r.logisticsCity ? ' (' + r.logisticsCity + ')' : ''}: ${money(r.logistics)}\n`;
+  if (r.agentFee > 0) t += `\n💳 Комиссия агента (${(r.agentPercent * 100).toFixed(1).replace('.0', '')}%): ${money(r.agentFee)}\n`;
   if (r.financing > 0) t += `\n💳 Финансирование (${r.financingMonths} мес): ${money(r.financing)}\n`;
   t += `\n💰 ИТОГО ПОД КЛЮЧ: ${money(r.grandTotal)}\n`;
   if (withStages !== false) {
@@ -1062,11 +1108,12 @@ function fillSettings() {
   $$('[data-ev]').forEach(el => { el.value = String(cfg[el.dataset.ev]).replace('.', ','); el.dataset.orig = el.value; });
   $$('[data-jur]').forEach(el => { el.value = String((cfg.jur || {})[el.dataset.jur]).replace('.', ','); el.dataset.orig = el.value; });
   $$('[data-fin]').forEach(el => { el.value = String((cfg.financing || {})[el.dataset.fin]).replace('.', ','); el.dataset.orig = el.value; });
+  $$('[data-agent]').forEach(el => { el.value = String((cfg.paymentAgent || {})[el.dataset.agent]).replace('.', ','); el.dataset.orig = el.value; });
 }
 
 function saveSettings() {
   const parseComma = (s) => parseFloat((s || '').toString().replace(',', '.'));
-  const patch = { rates: { cbr: {}, market: {} }, jur: {}, financing: {} };
+  const patch = { rates: { cbr: {}, market: {} }, jur: {}, financing: {}, paymentAgent: {} };
   // Сохраняем только ПОДПРАВЛЕННЫЕ поля. Иначе безусловная запись cbr-полей
   // навсегда «замораживает» курсы ЦБ: overrides применяются поверх свежего кэша ЦБ,
   // и ежедневная автозагрузка перестаёт влиять на расчёт.
@@ -1090,6 +1137,11 @@ function saveSettings() {
     if (el.value === el.dataset.orig) return;
     const v = parseComma(el.value);
     if (!isNaN(v)) patch.financing[el.dataset.fin] = v;
+  });
+  $$('[data-agent]').forEach(el => {
+    if (el.value === el.dataset.orig) return;
+    const v = parseComma(el.value);
+    if (!isNaN(v)) patch.paymentAgent[el.dataset.agent] = v;
   });
   patchOverrides(patch);
   cfg = buildConfig();

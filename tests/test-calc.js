@@ -221,6 +221,57 @@ const r10 = calculate({
 check('Регрессия: тот же ИТОГО 3 019 703', r10.grandTotal, 3019703, 1);
 check('Регрессия: Σ этапов = ИТОГО', sumStages2(r10), r10.grandTotal, 0.01);
 
+/* ============ Тест 11 — Грузия, физлицо РФ ($ + логистика $) ============ */
+console.log('\n— Тест 11: Грузия физлицо РФ, $20000 + логистика $1000, 2000 см³, 150 л.с., <3 лет —');
+const r11 = calculate({
+  country: 'ge', customsMode: 'phys_rf', currency: 'USD', age: '<3',
+  volumeCc: 2000, powerHp: 150, carPrice: 20000, geLogistics: 1000,
+  commission: 0, extraExpenses: 0,
+  expenses: [{ key: 'broker', value: 100000 }, { key: 'rf_logistics', value: 0 }],
+}, { rates: RATES });
+check('Грузия: авто = 20000 × USD_VTB', r11.carCostRub, 20000 * 82, 1);
+check('Грузия: логистика = 1000 × USD_VTB', r11.foreignLogisticsRub, 1000 * 82, 1);
+check('Грузия: тамож. стоимость = (20000+1000) × ЦБ$', r11.customsValueRub, 21000 * 78.554, 1);
+checkTrue('Грузия: пошлина считается (ЕТС, > 0)', r11.duty > 0);
+check('Тест 11: Σ этапов = ИТОГО', sumStages2(r11), r11.grandTotal, 0.01);
+
+// Грузия через КГ (ручная) — логистика Грузии сворачивается в логистику режима
+const r11kg = calculate({
+  country: 'ge', customsMode: 'phys_kg', currency: 'USD', age: '<3',
+  volumeCc: 2000, powerHp: 150, carPrice: 20000, geLogistics: 1000,
+  manualCustoms: 1500, expenses: [],
+}, { rates: RATES });
+check('Грузия КГ: пошлина = 0 (ручная)', r11kg.duty, 0);
+check('Грузия КГ: логистика включает geLogistics', r11kg.manualLogisticsRub, 1000 * 82, 1);
+check('Тест 11кг: Σ этапов = ИТОГО', sumStages2(r11kg), r11kg.grandTotal, 0.01);
+
+/* ============ Тест 12 — Комиссия платёжного агента 2% ============ */
+console.log('\n— Тест 12: комиссия агента 2% от инвойса —');
+const r12base = calculate({ country: 'cn', customsMode: 'phys_rf', currency: 'USD', age: '<3', volumeCc: 2000, powerHp: 150, carPrice: 20000, leg1: 0, leg2: 0, expenses: [] }, { rates: RATES });
+const r12 = calculate({ country: 'cn', customsMode: 'phys_rf', currency: 'USD', age: '<3', volumeCc: 2000, powerHp: 150, carPrice: 20000, leg1: 0, leg2: 0, agentEnabled: true, agentPercent: 0.02, expenses: [] }, { rates: RATES });
+check('Комиссия агента = 2% × (цена × USD_VTB)', r12.agentFee, 0.02 * 20000 * 82, 1);
+check('ИТОГО с агентом = база + agentFee', r12.grandTotal, r12base.grandTotal + 0.02 * 20000 * 82, 1);
+check('Тест 12: Σ этапов = ИТОГО', sumStages2(r12), r12.grandTotal, 0.01);
+// агент + финансирование вместе: финансирование считается от base (включая агента)
+const r12fin = calculate({ country: 'cn', customsMode: 'phys_rf', currency: 'USD', age: '<3', volumeCc: 2000, powerHp: 150, carPrice: 20000, leg1: 0, leg2: 0, agentEnabled: true, agentPercent: 0.02, financingEnabled: true, financingMonths: 3, expenses: [] }, { rates: RATES });
+check('Агент+финанс: Σ этапов = ИТОГО', sumStages2(r12fin), r12fin.grandTotal, 0.01);
+checkTrue('Финансирование учитывает комиссию агента в базе', r12fin.financing > 0.02 * 3 * r12base.grandTotal);
+
+/* ============ Тест 13 — Китай: логистика (плечи) в ¥ vs $ ============ */
+console.log('\n— Тест 13: Китай плечи в ¥ (курс ВТБ) —');
+const r13usd = calculate({ country: 'cn', customsMode: 'phys_rf', currency: 'USD', age: '<3', volumeCc: 2000, powerHp: 150, carPrice: 20000, leg1: 1000, leg2: 1800, expenses: [] }, { rates: RATES });
+const r13cny = calculate({ country: 'cn', customsMode: 'phys_rf', currency: 'CNY', age: '<3', volumeCc: 2000, powerHp: 150, carPrice: 145000, leg1: 7000, leg2: 13000, expenses: [] }, { rates: RATES });
+check('Китай $: плечи 2800 × USD_VTB', r13usd.foreignLogisticsRub, 2800 * 82, 1);
+check('Китай ¥: плечи 20000 × CNY_VTB', r13cny.foreignLogisticsRub, 20000 * 11.4, 1);
+
+/* ============ Тест 14 — Европа: редактируемый фрахт ============ */
+console.log('\n— Тест 14: Европа фрахт вручную —');
+const r14auto = calculate({ country: 'eu', customsMode: 'phys_rf', age: '<3', volumeCc: 1500, powerHp: 150, carPrice: 20000, carCount: 1, expenses: [] }, { rates: RATES });
+const r14man = calculate({ country: 'eu', customsMode: 'phys_rf', age: '<3', volumeCc: 1500, powerHp: 150, carPrice: 20000, carCount: 1, freightEur: 7000, expenses: [] }, { rates: RATES });
+check('Европа авто-фрахт (1 авто) = 5900 €', r14auto.foreign.freight, 5900);
+check('Европа ручной фрахт = 7000 €', r14man.foreign.freight, 7000);
+checkTrue('Ручной фрахт меняет итог', r14man.grandTotal !== r14auto.grandTotal);
+
 /* ============ Итог ============ */
 console.log(failed === 0 ? '\n🎉 Все тесты пройдены' : `\n💥 Провалено проверок: ${failed}`);
 process.exit(failed === 0 ? 0 : 1);

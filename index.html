@@ -61,12 +61,17 @@
         </label>
       </section>
 
-      <!-- Опции авто (компактно) -->
-      <section class="card toggles">
-        <label class="switch-row">
-          <span>Электрокар</span>
-          <input type="checkbox" id="isElectric" class="switch">
-        </label>
+      <!-- Тип авто -->
+      <section class="card">
+        <div class="field">
+          <label for="carType">Тип авто</label>
+          <select id="carType">
+            <option value="ice">ДВС (бензин/дизель)</option>
+            <option value="hybrid_parallel">Параллельный гибрид</option>
+            <option value="hybrid_serial">Последовательный гибрид</option>
+            <option value="electric">Электрокар</option>
+          </select>
+        </div>
       </section>
 
       <!-- Параметры авто -->
@@ -118,10 +123,14 @@
           <label for="dealerWon">Дилерские расходы, <span id="curLabelKrDl" class="cur">₩</span></label>
           <input type="number" id="dealerWon" inputmode="numeric" placeholder="440000">
         </div>
-        <!-- Корея: редактируемый % НДС (у разных поставщиков разный) -->
+        <!-- Корея: редактируемые % НДС и % возврата (у разных поставщиков разные) -->
         <div class="field" id="fieldKorVat">
-          <label for="korVat">НДС Кореи, % <span class="cur">(возврат 40%)</span></label>
+          <label for="korVat">НДС Кореи, %</label>
           <input type="number" id="korVat" inputmode="decimal" placeholder="9" value="9">
+        </div>
+        <div class="field" id="fieldKorRefund">
+          <label for="korRefund">Возврат НДС, %</label>
+          <input type="number" id="korRefund" inputmode="decimal" placeholder="40" value="40">
         </div>
         <p class="hint hidden" id="krVatInfo"></p>
 

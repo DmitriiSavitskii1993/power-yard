@@ -142,13 +142,14 @@ function computeForeign(cfg, input, rates) {
     const dealer = Number(input.dealerWon) || 0;
     const sum = price + delivery + dealer;
     const korVat = (input.korVatPercent != null ? input.korVatPercent : cfg.korea.vatPercent);
+    const refundPct = (input.korRefundPercent != null ? input.korRefundPercent : cfg.korea.vatRefundPercent);
     const vat = sum * korVat;
-    const refund = vat * cfg.korea.vatRefundPercent;
+    const refund = vat * refundPct;
     return {
       carCostRub: (sum - refund) * rates.payRate,
       customsValueRubBase: sum * rates.cbrRate,
       foreignLogisticsRub: 0,
-      detail: { sum, korVat, vat, refund, pay: sum - refund, delivery, dealer },
+      detail: { sum, korVat, vat, refund, refundPct, pay: sum - refund, delivery, dealer },
     };
   }
   if (input.country === 'eu') {
@@ -213,7 +214,10 @@ function calculate(input, cfg) {
   powerKw = powerKw || 0; powerHp = powerHp || 0;
   const volumeCc = input.volumeCc || 0;
   const isOlderThan3 = input.age !== '<3';
-  const isElectric = !!input.isElectric;
+  // тип авто: ДВС / параллельный гибрид → расчёт по объёму (ДВС);
+  //           электрокар / последовательный гибрид → спец. схема (15%+акциз+НДС, утиль ЭЛ)
+  const carType = input.carType || (input.isElectric ? 'electric' : 'ice');
+  const isElectric = (carType === 'electric' || carType === 'hybrid_serial');
 
   const country = input.country;
   const currency = input.currency || (country === 'kr' ? 'KRW' : country === 'eu' ? 'EUR' : 'USD');
@@ -316,6 +320,7 @@ function calculate(input, cfg) {
   return {
     input: { ...input, powerKw, powerHp, volumeCc, currency, customsMode: mode },
     country, currency, customsMode: mode, isManual, isCif: !!input.isCif,
+    carType, isElectric,   // isElectric — итоговый флаг расчёта (учитывает гибриды)
     carCostRub,
     foreignLogisticsRub,
     customsValueRub: cb.customsValueRub,

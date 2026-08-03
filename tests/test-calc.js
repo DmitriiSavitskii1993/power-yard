@@ -272,6 +272,32 @@ check('Европа авто-фрахт (1 авто) = 5900 €', r14auto.foreig
 check('Европа ручной фрахт = 7000 €', r14man.foreign.freight, 7000);
 checkTrue('Ручной фрахт меняет итог', r14man.grandTotal !== r14auto.grandTotal);
 
+/* ============ Тест 15 — типы авто: гибриды (послед. = электро, паралл. = ДВС) ============ */
+console.log('\n— Тест 15: типы авто (гибриды) —');
+const baseCar = { country: 'eu', customsMode: 'phys_rf', age: '<3', volumeCc: 2000, powerHp: 250, carPrice: 30000, carCount: 1, expenses: [] };
+const rIce = calculate({ ...baseCar, carType: 'ice' }, { rates: RATES });
+const rHevPar = calculate({ ...baseCar, carType: 'hybrid_parallel' }, { rates: RATES });
+const rHevSer = calculate({ ...baseCar, carType: 'hybrid_serial', powerKw: hpToKw(250), powerHp: null }, { rates: RATES });
+const rElec = calculate({ ...baseCar, volumeCc: 0, powerKw: hpToKw(250), powerHp: null, carType: 'electric' }, { rates: RATES });
+check('Параллельный гибрид считается как ДВС (пошлина = ДВС)', rHevPar.duty, rIce.duty, 1);
+checkTrue('Параллельный гибрид: НДС/акциз = 0 (как ДВС)', rHevPar.vat === 0 && rHevPar.excise === 0);
+checkTrue('Последовательный гибрид: считается как электро (НДС > 0)', rHevSer.vat > 0 && rHevSer.isElectric === true);
+checkTrue('Последовательный гибрид ≈ электрокар по схеме', Math.abs(rHevSer.duty - rElec.duty) < 1);
+checkTrue('ДВС: isElectric = false', rIce.isElectric === false);
+check('Тест 15: Σ этапов = ИТОГО (послед. гибрид)', sumStages2(rHevSer), rHevSer.grandTotal, 0.01);
+
+/* ============ Тест 16 — редактируемый возврат НДС Кореи ============ */
+console.log('\n— Тест 16: возврат НДС Кореи (редактируемый %) —');
+const krBase = { country: 'kr', customsMode: 'phys_rf', age: '<3', volumeCc: 2000, powerKw: 120, carPrice: 18800000, deliveryWon: 1300000, dealerWon: 440000, korVatPercent: 0.09, expenses: [] };
+const r16def = calculate({ ...krBase, korRefundPercent: 0.40 }, { rates: RATES });
+const r16half = calculate({ ...krBase, korRefundPercent: 0.50 }, { rates: RATES });
+const sum16 = 18800000 + 1300000 + 440000;
+const vat16 = sum16 * 0.09;
+check('Возврат 40% = 9% НДС × 40%', r16def.foreign.refund, vat16 * 0.40, 1);
+check('Возврат 50% (изменённый)', r16half.foreign.refund, vat16 * 0.50, 1);
+check('refundPct прокинут в detail', r16half.foreign.refundPct, 0.50, 0.001);
+checkTrue('Больше возврат → меньше платёж за авто', r16half.carCostRub < r16def.carCostRub);
+
 /* ============ Итог ============ */
 console.log(failed === 0 ? '\n🎉 Все тесты пройдены' : `\n💥 Провалено проверок: ${failed}`);
 process.exit(failed === 0 ? 0 : 1);

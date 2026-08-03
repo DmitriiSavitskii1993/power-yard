@@ -14,13 +14,17 @@ const BRAND_DARK  = '#161616';  // чёрный (подытоги секций �
 /* --- состояние --- */
 const state = {
   country: 'kr',
-  isElectric: false,
+  carType: 'ice',       // ice / hybrid_parallel / hybrid_serial / electric
+  isElectric: false,    // производный флаг расчёта (electric || hybrid_serial)
   powerUnit: 'hp',
   logisticsCity: '',    // город доставки по РФ (к строке «Логистика по РФ»)
   currency: 'KRW',      // валюта оплаты (₩/$/€/¥)
   customsMode: 'phys_rf', // схема растаможки (phys_rf/phys_kg/jur/manual_belka)
   isCif: false,         // Китай: цена уже CIF СПб
 };
+/* последовательный гибрид и электрокар считаются по «электро»-схеме (15%+акциз+НДС, утиль ЭЛ) */
+function carTypeIsElectric(t) { return t === 'electric' || t === 'hybrid_serial'; }
+const CAR_TYPE_LABEL = { ice: 'ДВС', hybrid_parallel: 'Паралл. гибрид', hybrid_serial: 'Послед. гибрид', electric: 'Электро' };
 
 function currentPreset() { return cfg.expensePresets[state.country]; }
 
@@ -105,10 +109,12 @@ function captureInputs() {
     extraExpenses: $('#extraExpenses') ? $('#extraExpenses').value : '',
     city: $('#logCity') ? $('#logCity').value : (state.logisticsCity || ''),
     // новые поля
+    carType: state.carType,
     currency: state.currency,
     customsMode: state.customsMode,
     isCif: state.isCif,
     korVat: $('#korVat') ? $('#korVat').value : '',
+    korRefund: $('#korRefund') ? $('#korRefund').value : '',
     leg1: $('#leg1') ? $('#leg1').value : '',
     leg2: $('#leg2') ? $('#leg2').value : '',
     manualCustoms: $('#manualCustoms') ? $('#manualCustoms').value : '',
@@ -130,6 +136,7 @@ function persistInputs() {
 /* подставить сохранённые поля в форму (форма уже отрисована для текущей страны) */
 function applyFieldInputs(saved) {
   saved = saved || {};
+  if ($('#carType')) $('#carType').value = state.carType;
   if (saved.age && $('#age')) {
     const opt = Array.prototype.some.call($('#age').options, o => o.value === saved.age);
     if (opt) $('#age').value = saved.age;
@@ -160,6 +167,8 @@ function applyFieldInputs(saved) {
       ? saved.dealerWon : (krDef ? cfg.korea.defaultDealerWon : '');
     if ($('#korVat')) $('#korVat').value = (saved.korVat != null && saved.korVat !== '')
       ? saved.korVat : (cfg.korea.vatPercent * 100);
+    if ($('#korRefund')) $('#korRefund').value = (saved.korRefund != null && saved.korRefund !== '')
+      ? saved.korRefund : (cfg.korea.vatRefundPercent * 100);
     updateKrVatInfo();
   } else if (state.country === 'eu') {
     if ($('#carCount')) $('#carCount').value = saved.carCount || '1';
@@ -178,6 +187,8 @@ function loadInputsFor(country) {
   const saved = getLastInputs()[country] || {};
   state.logisticsCity = saved.city || '';
   state.powerUnit = saved.powerUnit || 'hp';
+  state.carType = saved.carType || 'ice';
+  state.isElectric = carTypeIsElectric(state.carType);
   // валюта/режим/CIF: восстановить или взять дефолт страны (1-й вариант из data.js)
   const curOpts = CALC_DATA.currencyOptions[country] || [{ id: 'USD' }];
   const modeOpts = CALC_DATA.customsModeOptions[country] || [{ id: 'phys_rf' }];
@@ -325,6 +336,7 @@ function renderModeFields() {
   $('#fieldDeliveryWon').classList.toggle('hidden', !isKr);
   $('#fieldDealerWon').classList.toggle('hidden', !isKr);
   $('#fieldKorVat').classList.toggle('hidden', !isKr);
+  $('#fieldKorRefund').classList.toggle('hidden', !isKr);
   $('#krVatInfo').classList.toggle('hidden', !isKr);
   // валютные подписи корейских сумм (доставка/дилерские вводятся в валюте цены)
   if (isKr) { const s = curSym(); $('#curLabelKrD').textContent = s; $('#curLabelKrDl').textContent = s; }
@@ -384,10 +396,11 @@ function updateKrVatInfo() {
   const cur = curSym();
   const sum = num('#carPrice') + num('#deliveryWon') + num('#dealerWon');
   const pct = ($('#korVat') ? num('#korVat') : (cfg.korea.vatPercent * 100)) || 0;
-  if (!sum) { el.textContent = `НДС Кореи ${pct}% и возврат 40% посчитаются автоматически.`; return; }
+  const refPct = ($('#korRefund') ? num('#korRefund') : (cfg.korea.vatRefundPercent * 100)) || 0;
+  if (!sum) { el.textContent = `НДС Кореи ${pct}% и возврат ${refPct}% посчитаются автоматически.`; return; }
   const vat = sum * pct / 100;
-  const refund = vat * cfg.korea.vatRefundPercent;
-  el.innerHTML = `НДС Кореи ${pct}%: <b>${fmtNum(vat)} ${cur}</b> · возврат 40%: <b>−${fmtNum(refund)} ${cur}</b> · к оплате: <b>${fmtNum(sum - refund)} ${cur}</b>`;
+  const refund = vat * refPct / 100;
+  el.innerHTML = `НДС Кореи ${pct}%: <b>${fmtNum(vat)} ${cur}</b> · возврат ${refPct}%: <b>−${fmtNum(refund)} ${cur}</b> · к оплате: <b>${fmtNum(sum - refund)} ${cur}</b>`;
 }
 
 function renderAgeOptions() {
@@ -433,10 +446,11 @@ function bindEvents() {
     hideResult();
   }));
 
-  $('#isElectric').addEventListener('change', (e) => {
-    state.isElectric = e.target.checked;
-    // официальный расчёт акциза/утиля для EV — от кВт; для ДВС привычнее л.с.
-    state.powerUnit = e.target.checked ? 'kw' : 'hp';
+  $('#carType').addEventListener('change', (e) => {
+    state.carType = e.target.value;
+    state.isElectric = carTypeIsElectric(state.carType);
+    // официальный расчёт акциза/утиля для «электро» — от кВт; для ДВС привычнее л.с.
+    state.powerUnit = state.isElectric ? 'kw' : 'hp';
     syncPowerUnit();
     renderCountry();
     persistInputs();
@@ -483,8 +497,8 @@ function bindEvents() {
     hideResult();
   });
 
-  // Корея: живая строка НДС при вводе цены/доставки/дилерских/процента
-  ['#carPrice', '#deliveryWon', '#dealerWon', '#korVat'].forEach(sel => {
+  // Корея: живая строка НДС при вводе цены/доставки/дилерских/процентов
+  ['#carPrice', '#deliveryWon', '#dealerWon', '#korVat', '#korRefund'].forEach(sel => {
     $(sel).addEventListener('input', () => { if (state.country === 'kr') updateKrVatInfo(); });
   });
 
@@ -519,7 +533,7 @@ function bindEvents() {
   // запоминать последние введённые поля
   $('#screenCalc').addEventListener('change', (e) => {
     const t = e.target;
-    if (t && t.matches && t.matches('#age, #volume, #power, #carPrice, #deliveryWon, #dealerWon, #carCount, #commission, #extraExpenses, #logCity, #korVat, #leg1, #leg2, #manualCustoms, #manualTransit, #finMonths, #freightEur, #geLogistics, #agentPercent')) {
+    if (t && t.matches && t.matches('#age, #volume, #power, #carPrice, #deliveryWon, #dealerWon, #carCount, #commission, #extraExpenses, #logCity, #korVat, #korRefund, #leg1, #leg2, #manualCustoms, #manualTransit, #finMonths, #freightEur, #geLogistics, #agentPercent')) {
       if (t.id === 'logCity') state.logisticsCity = t.value;
       persistInputs();
     }
@@ -623,6 +637,7 @@ function onCalculate() {
     currency: state.currency,
     customsMode: state.customsMode,
     isCif: state.country === 'cn' && state.isCif,
+    carType: state.carType,
     isElectric: state.isElectric,
     age: $('#age').value,
     volumeCc: state.isElectric ? 0 : num('#volume'),
@@ -632,6 +647,7 @@ function onCalculate() {
     deliveryWon: state.country === 'kr' ? num('#deliveryWon') : 0,
     dealerWon: state.country === 'kr' ? num('#dealerWon') : 0,
     korVatPercent: state.country === 'kr' ? (num('#korVat') / 100) : undefined,
+    korRefundPercent: state.country === 'kr' ? (num('#korRefund') / 100) : undefined,
     carCount: state.country === 'eu' ? (Number($('#carCount').value) || 1) : 1,
     freightEur: state.country === 'eu' ? ($('#freightEur').value !== '' ? num('#freightEur') : null) : null,
     leg1: state.country === 'cn' ? num('#leg1') : 0,
@@ -721,7 +737,7 @@ function renderResult(r) {
     <div class="row sub"><span class="k">Доставка по Корее + фрахт</span><span class="v">${fmtNum(f.delivery)} ${cur}</span></div>
     <div class="row sub"><span class="k">Дилерские расходы</span><span class="v">${fmtNum(f.dealer)} ${cur}</span></div>
     <div class="row sub"><span class="k">НДС Кореи ${Math.round((f.korVat || 0) * 100)}%</span><span class="v">${fmtNum(f.vat)} ${cur}</span></div>
-    <div class="row sub"><span class="k">Возврат ${Math.round(cfg.korea.vatRefundPercent * 100)}% НДС</span><span class="v">−${fmtNum(f.refund)} ${cur}</span></div>
+    <div class="row sub"><span class="k">Возврат ${Math.round((f.refundPct != null ? f.refundPct : cfg.korea.vatRefundPercent) * 100)}% НДС</span><span class="v">−${fmtNum(f.refund)} ${cur}</span></div>
     <div class="row sub"><span class="k">К оплате</span><span class="v">${fmtNum(f.pay)} ${cur}</span></div>` + rateRows;
   } else if (c === 'eu') {
     const freightRow = r.isManual ? '' :
@@ -813,9 +829,10 @@ function renderResult(r) {
 function buildTableLines(r, withStages) {
   const ageShort = { '<3': '<3 лет', '3-5': '3-5 лет', '5-7': '5-7 лет', '>7': '>7 лет', '>3': '>3 лет' };
   const ageLabel = ageShort[r.input.age] || '';
-  const params = r.input.isElectric
-    ? `${ageLabel} · ${Math.round(r.input.powerKw)} кВт`
-    : `${ageLabel} · ${fmtNum(r.input.volumeCc)} см³ · ${Math.round(r.input.powerHp)} л.с.`;
+  const typeLabel = CAR_TYPE_LABEL[r.carType] || '';
+  const params = r.isElectric
+    ? `${typeLabel} · ${ageLabel} · ${Math.round(r.input.powerKw)} кВт`
+    : `${typeLabel} · ${ageLabel} · ${fmtNum(r.input.volumeCc)} см³ · ${Math.round(r.input.powerHp)} л.с.`;
 
   const money = (n) => fmtNum(n).replace(/ /g, ' ') + ' ₽';
   const c = r.country;
@@ -830,7 +847,7 @@ function buildTableLines(r, withStages) {
     foreignItems.push(['  Доставка+фрахт', fmtNum(f.delivery) + ' ' + cur]);
     foreignItems.push(['  Дилерские', fmtNum(f.dealer) + ' ' + cur]);
     foreignItems.push([`  НДС ${Math.round((f.korVat || 0) * 100)}%`, fmtNum(f.vat) + ' ' + cur]);
-    foreignItems.push(['  Возврат 40%', '−' + fmtNum(f.refund) + ' ' + cur]);
+    foreignItems.push([`  Возврат ${Math.round((f.refundPct != null ? f.refundPct : cfg.korea.vatRefundPercent) * 100)}%`, '−' + fmtNum(f.refund) + ' ' + cur]);
     foreignItems.push(['  К оплате', fmtNum(f.pay) + ' ' + cur]);
   } else if (c === 'eu') {
     if (!r.isManual) foreignItems.push([`  Фрахт (${f.carCount === 1 ? '1 авто' : 'консолид.'})`, fmtNum(f.freight) + ' ' + cur]);
@@ -940,9 +957,10 @@ function buildShareText(r, withStages) {
   const cur = curSym(r);
   const f = r.foreign || {};
   const ageShort = { '<3': '<3 лет', '3-5': '3-5 лет', '5-7': '5-7 лет', '>7': '>7 лет', '>3': '>3 лет' };
-  const params = r.input.isElectric
-    ? `${ageShort[r.input.age] || ''} · ${Math.round(r.input.powerKw)} кВт`
-    : `${ageShort[r.input.age] || ''} · ${fmtNum(r.input.volumeCc)} см³ · ${Math.round(r.input.powerHp)} л.с.`;
+  const typeLabel = CAR_TYPE_LABEL[r.carType] || '';
+  const params = r.isElectric
+    ? `${typeLabel} · ${ageShort[r.input.age] || ''} · ${Math.round(r.input.powerKw)} кВт`
+    : `${typeLabel} · ${ageShort[r.input.age] || ''} · ${fmtNum(r.input.volumeCc)} см³ · ${Math.round(r.input.powerHp)} л.с.`;
   const money = (n) => fmtNum(n) + ' ₽';
 
   let t = `🚗 Power Yard — Расчёт авто\n${FLAGS[c]} ${params} · ${MODE_LABEL[r.customsMode]}\n\n`;
@@ -951,7 +969,7 @@ function buildShareText(r, withStages) {
   if (c === 'kr') {
     t += `• Доставка по Корее + фрахт: ${fmtNum(f.delivery)} ${cur}\n`;
     t += `• Дилерские расходы: ${fmtNum(f.dealer)} ${cur}\n`;
-    t += `• НДС Кореи ${Math.round((f.korVat || 0) * 100)}%: ${fmtNum(f.vat)} ${cur}, возврат 40%: −${fmtNum(f.refund)} ${cur}\n`;
+    t += `• НДС Кореи ${Math.round((f.korVat || 0) * 100)}%: ${fmtNum(f.vat)} ${cur}, возврат ${Math.round((f.refundPct != null ? f.refundPct : cfg.korea.vatRefundPercent) * 100)}%: −${fmtNum(f.refund)} ${cur}\n`;
     t += `• К оплате: ${fmtNum(f.pay)} ${cur}\n`;
   } else if (c === 'eu') {
     if (!r.isManual) t += `• Фрахт (${f.carCount === 1 ? '1 авто' : 'консолидация'}): ${fmtNum(f.freight)} ${cur}\n`;

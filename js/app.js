@@ -666,11 +666,9 @@ function onCalculate() {
   };
 
   if (!input.carPrice) { toast('Укажите цену авто'); return; }
-  // мощность нужна для акциза/утиля — в ручных режимах не обязательна
-  if (!isManual) {
-    if (!state.isElectric && !input.volumeCc) { toast('Укажите объём двигателя'); return; }
-    if (!powerVal) { toast('Укажите мощность двигателя'); return; }
-  }
+  // мощность/объём нужны для утиля (платится при ввозе в РФ во всех режимах, включая КГ/Белку)
+  if (!state.isElectric && !input.volumeCc) { toast('Укажите объём двигателя'); return; }
+  if (!powerVal) { toast('Укажите мощность двигателя'); return; }
   if (isManual && !input.manualCustoms) { toast('Укажите стоимость растаможки (ТО)'); return; }
 
   persistInputs();   // запомнить последние введённые поля для этой страны
@@ -758,9 +756,11 @@ function renderResult(r) {
   let customsSection = '';
   if (r.isManual) {
     customsSection = `
-    <div class="sec-head"><span>Растаможка (${MODE_LABEL[r.customsMode]})</span><span class="sec-sum">${fmt(r.customsTotal)}</span></div>
+    <div class="sec-head"><span>Растаможка + утиль (${MODE_LABEL[r.customsMode]})</span><span class="sec-sum">${fmt(r.customsTotal)}</span></div>
     <div class="row sub"><span class="k">Стоимость растаможки (ТО)</span><span class="v">${fmt(r.manualCustomsRub)}</span></div>
-    ${r.manualLogisticsRub > 0 ? `<div class="row sub"><span class="k">Транзит / логистика</span><span class="v">${fmt(r.manualLogisticsRub)}</span></div>` : ''}`;
+    ${r.manualLogisticsRub > 0 ? `<div class="row sub"><span class="k">Транзит / логистика</span><span class="v">${fmt(r.manualLogisticsRub)}</span></div>` : ''}
+    <div class="row sub"><span class="k">Утильсбор (коэф. ${r.utilCoef})</span><span class="v">${fmt(r.utilFee)}</span></div>
+    ${utilFlag}`;
   } else {
     const showExciseVat = (r.excise > 0 || r.vat > 0);
     const exciseVatRows = showExciseVat ? `
@@ -867,7 +867,8 @@ function buildTableLines(r, withStages) {
   if (r.isManual) {
     const manItems = [['  Растаможка (ТО)', money(r.manualCustomsRub)]];
     if (r.manualLogisticsRub > 0) manItems.push(['  Транзит/логистика', money(r.manualLogisticsRub)]);
-    sections.push({ head: ['РАСТАМОЖКА (' + MODE_LABEL[r.customsMode].toUpperCase() + ')', money(r.customsTotal)], items: manItems });
+    manItems.push([`  Утиль (${r.utilCoef})`, money(r.utilFee)]);
+    sections.push({ head: ['РАСТАМОЖКА+УТИЛЬ (' + MODE_LABEL[r.customsMode].toUpperCase() + ')', money(r.customsTotal)], items: manItems });
   } else {
     const customsItems = [['  Пошлина+сбор', money(r.duty + r.customsFee)]];
     if (r.excise > 0 || r.vat > 0) { customsItems.push(['  Акциз', money(r.excise)]); customsItems.push(['  НДС', money(r.vat)]); }
@@ -981,9 +982,10 @@ function buildShareText(r, withStages) {
   t += `• В рублях: ${money(r.carCostRub)}\n`;
   if (r.foreignLogisticsRub > 0) t += `\n🚚 ${c === 'ge' ? 'Логистика до РФ' : 'Логистика Китай→Бишкек→СПб'}: ${money(r.foreignLogisticsRub)}\n`;
   if (r.isManual) {
-    t += `\n🛃 Растаможка (${MODE_LABEL[r.customsMode]}): ${money(r.customsTotal)}\n`;
+    t += `\n🛃 Растаможка + утиль (${MODE_LABEL[r.customsMode]}): ${money(r.customsTotal)}\n`;
     t += `• Стоимость растаможки (ТО): ${money(r.manualCustomsRub)}\n`;
     if (r.manualLogisticsRub > 0) t += `• Транзит / логистика: ${money(r.manualLogisticsRub)}\n`;
+    t += `• Утильсбор: ${money(r.utilFee)}\n`;
   } else {
     t += `\n🛃 Таможенные платежи: ${money(r.customsTotal)}\n`;
     t += `• Пошлина и таможенный сбор: ${money(r.duty + r.customsFee)}\n`;

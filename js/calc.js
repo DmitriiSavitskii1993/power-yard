@@ -240,10 +240,14 @@ function calculate(input, cfg) {
     if (mode === 'manual_belka') carCostRub = (Number(input.carPrice) || 0) * rates.payRate; // без фрахта
     if (country === 'cn' || country === 'ge') moLogistics += foreignLogisticsRub; // плечи Китая / логистика Грузии
     foreignLogisticsRub = 0; // свёрнуто в moLogistics
+    // Утильсбор РФ платится при ввозе В РФ независимо от схемы растаможки (КГ/Белка тоже).
+    // Физлицо-схема: льгота до 160 л.с. ДВС / 80 л.с. EV.
+    const mUtilCoef = findUtilCoef(cfg, isElectric, volumeCc, powerKw, powerHp, isOlderThan3);
+    const mUtilFee = cfg.utilBase * mUtilCoef;
     cb = {
       manual: true, manualCustomsRub: moCustoms, manualLogisticsRub: moLogistics,
-      duty: 0, excise: 0, vat: 0, customsFee: 0, utilFee: 0, utilCoef: 0,
-      customsValueRub: 0, total: moCustoms + moLogistics, method: 'Ручная растаможка',
+      duty: 0, excise: 0, vat: 0, customsFee: 0, utilFee: mUtilFee, utilCoef: mUtilCoef,
+      customsValueRub: 0, total: moCustoms + moLogistics + mUtilFee, method: 'Ручная растаможка + утильсбор',
     };
   } else if (mode === 'jur') {
     cb = calcJurBlock(cfg, {
@@ -263,7 +267,7 @@ function calculate(input, cfg) {
   const _prefCoef = cfg.utilPreferentialCoef || { new: 0.17, old: 0.26 };
   const _prefHp = cfg.utilPreferentialHp || { ice: 160, ev: 80 };
   const utilThresholdHp = isElectric ? _prefHp.ev : _prefHp.ice;
-  const hasUtilTrap = (mode === 'phys_rf');
+  const hasUtilTrap = (mode === 'phys_rf' || isManual); // физлицо-схемы (РФ + КГ/Белка)
   const utilPreferentialApplied = powerHp <= utilThresholdHp;
   const utilPreferentialFee = cfg.utilBase * (isOlderThan3 ? _prefCoef.old : _prefCoef.new);
 
@@ -300,6 +304,7 @@ function calculate(input, cfg) {
       { label: 'Депозит (р/с)', short: 'Депозит', value: commission },
       { label: 'Оплата за авто (инвойс)', short: 'Авто (инвойс)', value: carCostRub },
       { label: 'Растаможка (ТО)', short: 'Растаможка', value: cb.manualCustomsRub },
+      { label: 'Утильсбор (квитанция)', short: 'Утильсбор', value: cb.utilFee },
       { label: 'Логистика / транзит и расходы' + (logisticsCity ? ' — ' + logisticsCity : ''),
         short: 'Логистика+расходы', value: cb.manualLogisticsRub + expensesSum + logistics },
       { label: 'Доп. расходы', short: 'Доп. расходы', value: extraExpenses },
